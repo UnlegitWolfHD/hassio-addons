@@ -42,19 +42,34 @@ export PULSE_SERVER="unix:/run/audio/pulse.sock"
 # braucht keinen.
 unset PULSE_COOKIE
 
-# Optionales Null-Sink: Ziel fuer Snapcast/Squeezelite auf Systemen ohne echte
-# Soundkarte. Sein Monitor ist dann die Aufnahmequelle fuer LedFx.
+# Virtuelles Ausgabeziel. Sein Monitor ist die Aufnahmequelle fuer LedFx.
+ensure_null_sink() {
+    if pactl list short modules 2>/dev/null | grep -q "sink_name=ledfx"; then
+        echo "[ledfx] Null-Sink 'ledfx' existiert bereits."
+    else
+        echo "[ledfx] Lege Null-Sink 'ledfx' an."
+        pactl load-module module-null-sink sink_name=ledfx sink_properties=device.description=LedFx >/dev/null
+    fi
+    pactl set-default-sink ledfx || true
+    pactl set-default-source ledfx.monitor || true
+    [ -z "$AUDIO_SOURCE" ] && AUDIO_SOURCE="ledfx.monitor"
+}
+
 case "$NULL_SINK" in
+    True|true|1) ensure_null_sink ;;
+esac
+
+# Sendspin braucht zwingend ein Ausgabeziel. Hat PulseAudio ueberhaupt keins
+# (headless Pi ohne Soundkarte), ist das Null-Sink die einzige Moeglichkeit
+# abzuspielen - dann ohne Nachfrage anlegen. Gibt es schon Sinks, wird nichts
+# angefasst, damit echte Hardware Standard-Ausgang bleibt.
+case "$SENDSPIN" in
     True|true|1)
-        if pactl list short modules 2>/dev/null | grep -q "sink_name=ledfx"; then
-            echo "[ledfx] Null-Sink 'ledfx' existiert bereits."
-        else
-            echo "[ledfx] Lege Null-Sink 'ledfx' an."
-            pactl load-module module-null-sink sink_name=ledfx sink_properties=device.description=LedFx >/dev/null
+        if [ "$(pactl list short sinks 2>/dev/null | wc -l)" -eq 0 ]; then
+            echo "[ledfx] PulseAudio hat kein Ausgabeziel - lege fuer Sendspin"
+            echo "[ledfx] automatisch eins an."
+            ensure_null_sink
         fi
-        pactl set-default-sink ledfx || true
-        pactl set-default-source ledfx.monitor || true
-        [ -z "$AUDIO_SOURCE" ] && AUDIO_SOURCE="ledfx.monitor"
         ;;
 esac
 
@@ -64,6 +79,8 @@ if [ -n "$AUDIO_SOURCE" ]; then
 fi
 
 if [ -S /run/audio/pulse.sock ]; then
+    echo "[ledfx] Verfuegbare PulseAudio-Ziele (Sinks):"
+    pactl list short sinks 2>&1 | sed 's/^/[ledfx]   /' || true
     echo "[ledfx] Verfuegbare PulseAudio-Quellen:"
     pactl list short sources 2>&1 | sed 's/^/[ledfx]   /' || true
     [ -n "$AUDIO_SOURCE" ] && echo "[ledfx] Aufnahmequelle (PULSE_SOURCE): $AUDIO_SOURCE"
@@ -74,8 +91,8 @@ fi
 
 # --- Sendspin ----------------------------------------------------------
 # Meldet das Add-on bei Music Assistant als Player an (mDNS, kein Server-URL
-# noetig). Der Ton laeuft dann in den PulseAudio-Sink, dessen Monitor LedFx
-# aufnimmt - Kette: Music Assistant -> Sendspin -> Sink -> LedFx -> WLED.
+# noetig). Der Ton laeuft in den Standard-Sink, dessen Monitor LedFx aufnimmt -
+# Kette: Music Assistant -> Sendspin -> Sink -> LedFx -> WLED.
 case "$SENDSPIN" in
     True|true|1)
         if [ ! -x /opt/sendspin/bin/sendspin ]; then
@@ -89,18 +106,23 @@ case "$SENDSPIN" in
             if [ ! -f "$SS_CFG/settings-daemon.json" ]; then
                 echo '{"use_mpris": false}' > "$SS_CFG/settings-daemon.json"
             fi
-            case "$NULL_SINK" in
-                True|true|1) ;;
-                *)
-                    echo "[ledfx] HINWEIS: sendspin=true, aber null_sink=false."
-                    echo "[ledfx]          Ohne Audio-Ziel kann Sendspin nichts"
-                    echo "[ledfx]          abspielen - entweder null_sink"
-                    echo "[ledfx]          aktivieren oder eine echte Soundkarte"
-                    echo "[ledfx]          als Standard-Ausgang setzen."
-                    ;;
-            esac
-            echo "[ledfx] Starte Sendspin-Daemon als \"$SENDSPIN_NAME\" (Port 8927)."
-            HOME="$CONFIG_DIR" /opt/sendspin/bin/sendspin daemon                 --name "$SENDSPIN_NAME" --audio-device pulse 2>&1                 | sed 's/^/[sendspin] /' &
+            echo "[ledfx] Starte Sendspin-Daemon als '$SENDSPIN_NAME' (Port 8927)."
+            # Exit-Code mitloggen: stirbt der Daemon still, sieht man sonst
+            # ueberhaupt nichts im Protokoll.
+            # sed -u ist Pflicht: ohne das puffert sed blockweise, solange
+            # stdout kein Terminal ist - im Docker-Log erscheint dann selbst
+            # von einem laufenden Daemon minutenlang gar nichts.
+            (
+                HOME="$CONFIG_DIR" /opt/sendspin/bin/sendspin daemon --name "$SENDSPIN_NAME" --audio-device pulse 2>&1
+                echo "Daemon beendet (Exit $?)."
+            ) | sed -u 's/^/[sendspin] /' &
+            SS_PID=$!
+            sleep 2
+            if kill -0 "$SS_PID" 2>/dev/null; then
+                echo "[ledfx] Sendspin laeuft (PID $SS_PID)."
+            else
+                echo "[ledfx] Sendspin wurde sofort beendet - siehe [sendspin]-Zeilen."
+            fi
         fi
         ;;
 esac

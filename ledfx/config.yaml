@@ -1,6 +1,6 @@
 ---
 name: LedFx
-version: "1.0.0"
+version: "1.0.1"
 slug: ledfx
 description: >-
   Audio-reactive LED-Steuerung fuer WLED & Co. (LedFx, offizielles GHCR-Image)

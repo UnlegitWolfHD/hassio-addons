@@ -24,8 +24,25 @@ sed -e "s|/data/options.json|$TMPW/options.json|g" \
 
 cat > "$BIN/pactl" <<'EOS'
 #!/bin/sh
+# Stub mit Zustand: FAKE_SINKS simuliert vorhandene Hardware, $STATE/nullsink
+# merkt sich ein zuvor angelegtes Null-Sink.
 echo "PACTL $*" >> "$LOG"
-[ "$1" = "list" ] && [ "$3" = "sources" ] && echo "0 ledfx.monitor module-null-sink.c IDLE"
+if [ "$1" = "list" ]; then
+    case "$3" in
+        sinks)
+            [ -n "$FAKE_SINKS" ] && echo "0 alsa_output.hw0 module-alsa-card.c RUNNING"
+            [ -f "$STATE/nullsink" ] && echo "1 ledfx module-null-sink.c IDLE"
+            ;;
+        sources)
+            [ -n "$FAKE_SINKS" ] && echo "0 alsa_output.hw0.monitor module-alsa-card.c IDLE"
+            [ -f "$STATE/nullsink" ] && echo "1 ledfx.monitor module-null-sink.c IDLE"
+            ;;
+        modules)
+            [ -f "$STATE/nullsink" ] && echo "0 module-null-sink sink_name=ledfx"
+            ;;
+    esac
+fi
+[ "$1" = "load-module" ] && touch "$STATE/nullsink"
 exit 0
 EOS
 cat > "$BIN/sendspin" <<'EOS'
@@ -43,11 +60,12 @@ run_case() {   # run_case <name> <options-json>
     NAME="$1"
     echo "$2" > "$TMPW/options.json"
     LOG="$TMP/log"; : > "$LOG"
+    STATE="$TMP/state"; rm -rf "$STATE"; mkdir -p "$STATE"
     # Umgebung wie im Upstream-Image vorbelegen
     PULSE_SERVER=unix:/home/ledfx/.config/pulse/pulseaudio.socket \
     PULSE_COOKIE=/home/ledfx/.config/pulse/cookie \
-    LOG="$LOG" PATH="$BIN:$PATH" sh "$TMP/run.sh" >> "$LOG" 2>&1 || echo "RUN_SH_EXIT=$?" >> "$LOG"
-    sleep 1   # Sendspin laeuft im Hintergrund
+    LOG="$LOG" STATE="$STATE" FAKE_SINKS="$FAKE_SINKS" PATH="$BIN:$PATH" sh "$TMP/run.sh" >> "$LOG" 2>&1 || echo "RUN_SH_EXIT=$?" >> "$LOG"
+    sleep 3   # run.sh prueft selbst 2s lang, ob der Daemon lebt
     echo "--- $NAME"
     cat "$LOG"
 }
@@ -81,8 +99,24 @@ expect "SENDSPIN daemon --name Wohnzimmer --audio-device pulse" "Daemon mit Name
 expect "HOME=$TMP/share/ledfx" "Sendspin-Config liegt persistent"
 expect "PULSE_SOURCE=ledfx.monitor" "Kette Sendspin -> Sink -> LedFx"
 
-run_case "Sendspin ohne Sink" '{"sendspin":true}'
-expect "HINWEIS: sendspin=true, aber null_sink=false" "Warnung ohne Audio-Ziel"
+FAKE_SINKS=""
+run_case "Sendspin, PulseAudio ohne jedes Ausgabeziel" '{"sendspin":true}'
+expect "PulseAudio hat kein Ausgabeziel" "Mangel erkannt"
+expect "PACTL load-module module-null-sink sink_name=ledfx" "Sink automatisch angelegt"
+expect "PULSE_SOURCE=ledfx.monitor" "LedFx auf den neuen Monitor gesetzt"
+expect "SENDSPIN daemon --name LedFx" "Daemon trotzdem gestartet"
+expect "Daemon beendet (Exit 0)" "Exit-Code des Daemons landet im Protokoll"
+expect "Sendspin wurde sofort beendet" "toter Daemon wird gemeldet"
+
+FAKE_SINKS=1
+run_case "Sendspin mit vorhandener Soundkarte" '{"sendspin":true}'
+if grep -q "load-module" "$TMP/log"; then
+    echo "  FAIL vorhandene Hardware wurde ueberschrieben"; FAILED=1
+else
+    echo "  OK   vorhandene Hardware unangetastet (kein Null-Sink)"
+fi
+expect "PULSE_SOURCE=<unset>" "Audio-Dropdown von HA behaelt die Kontrolle"
+FAKE_SINKS=""
 
 echo
 [ -f "$TMP/share/ledfx/.config/sendspin/settings-daemon.json" ] \

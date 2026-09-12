@@ -84,8 +84,8 @@ offline_mode: false
 | `port` | Port | `8888` | Port der Web-UI. Nur ändern, wenn 8888 auf dem Host belegt ist — dann zeigt der Button „Web-UI öffnen" auf den falschen Port und die URL muss manuell eingegeben werden. |
 | `log_level` | `info` / `debug` / `trace` | `info` | `debug` entspricht `ledfx -v`, `trace` entspricht `-vv`. |
 | `audio_source` | String | `""` | Name der PulseAudio-Quelle, die LedFx aufnimmt (meist eine `*.monitor`-Quelle). Leer = Systemstandard. Siehe Abschnitt 5. |
-| `null_sink` | Bool | `false` | Legt beim Start ein virtuelles Audio-Ziel `ledfx` an und macht es zum Standard-Ausgang. Nötig auf Systemen ohne echte Soundkarte. **Achtung:** ändert den Standard-Ausgang für *alle* Add-ons, TTS-Ansagen landen dann im Nichts. |
-| `sendspin` | Bool | `false` | Startet den Sendspin-Daemon, damit das Add-on in Music Assistant als Player erscheint. Zusammen mit `null_sink: true` benutzen. |
+| `null_sink` | Bool | `false` | Erzwingt ein virtuelles Audio-Ziel `ledfx` als Standard-Ausgang. Bei `sendspin: true` meist unnötig — dann wird eines automatisch angelegt, *falls* gar kein Sink existiert. **Achtung:** erzwungen ändert es den Standard-Ausgang für *alle* Add-ons, TTS-Ansagen landen dann im Nichts. |
+| `sendspin` | Bool | `false` | Startet den Sendspin-Daemon, damit das Add-on in Music Assistant als Player erscheint. Legt bei Bedarf selbst ein Audio-Ziel an. |
 | `sendspin_name` | String | `LedFx` | Anzeigename des Players in Music Assistant. |
 | `offline_mode` | Bool | `false` | Startet LedFx mit `--offline`: keine Update-Checks, kein Crash-Reporting. |
 
@@ -122,8 +122,7 @@ Home-Assistant-Ingress stellt jeder Anfrage ein Präfix
 
 ## 5. Audio-Routing aus Music Assistant / Snapcast
 
-> **Kurzfassung für den Normalfall:** `sendspin: true` + `null_sink: true`
-> setzen, neu starten — fertig. Das Add-on erscheint dann in Music Assistant
+> **Kurzfassung für den Normalfall:** `sendspin: true` setzen, neu starten — fertig. Das Add-on erscheint dann in Music Assistant
 > als Player namens *LedFx*. Die Details dazu stehen in Variante A.
 
 Der Teil, an dem die meisten Setups scheitern — hier Schritt für Schritt.
@@ -181,13 +180,20 @@ eingebaut, immer aktiv und findet Geräte per mDNS von allein. Dieses Add-on
 bringt einen Sendspin-Daemon mit, das heißt: **kein zweites Add-on, kein
 Snapcast-Server, keine IP-Eintragerei.**
 
-1. *LedFx → Konfiguration →* `sendspin: true` und `null_sink: true` setzen,
-   bei Bedarf `sendspin_name` anpassen. Speichern, Add-on neu starten.
+1. *LedFx → Konfiguration →* `sendspin: true` setzen, bei Bedarf
+   `sendspin_name` anpassen. Speichern, Add-on neu starten.
+   `null_sink` muss **nicht** gesetzt werden: hat PulseAudio überhaupt kein
+   Ausgabeziel, legt das Add-on selbst eines an. Existierende Sinks (echte
+   Soundkarte, HDMI) bleiben unangetastet.
 2. Im Add-on-Log erscheint:
 
    ```
-   [ledfx] Starte Sendspin-Daemon als "LedFx" (Port 8927).
+   [ledfx] Starte Sendspin-Daemon als 'LedFx' (Port 8927).
+   [ledfx] Sendspin laeuft (PID 42).
    ```
+
+   Steht dort stattdessen `Sendspin wurde sofort beendet`, verrät die
+   darauffolgende `[sendspin]`-Zeile den Grund.
 
 3. In Music Assistant unter *Einstellungen → Player* auftauchen lassen — der
    Player erscheint nach wenigen Sekunden von selbst. Nichts hinzufügen, nichts
