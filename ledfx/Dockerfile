@@ -17,6 +17,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libasound2-plugins pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Sendspin-Client: damit meldet sich das Add-on bei Music Assistant als Player
+# an (Sendspin ist MAs eigenes Protokoll, eingebaut und immer aktiv).
+# Eigenes venv, weil sendspin und LedFx sich numpy/av/sounddevice teilen, aber
+# mit anderen Pins - ein gemeinsames venv wuerde LedFx zerlegen.
+RUN /usr/local/bin/python3 -m venv /opt/sendspin && /opt/sendspin/bin/pip install --no-cache-dir sendspin && find /opt/sendspin -name '__pycache__' -prune -exec rm -rf {} +
+
 # Kein eigenes /etc/asound.conf noetig: der Supervisor mountet bei
 # 'audio: true' seine eigene Vorlage schreibgeschuetzt nach /etc/asound.conf
 # (pcm.!default -> type pulse) und ueberschreibt damit jede eigene Datei.

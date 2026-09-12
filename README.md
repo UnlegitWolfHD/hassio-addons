@@ -10,6 +10,7 @@ für Home Assistant OS / Supervised, basierend auf dem offiziellen Container-Ima
 | Web-UI | Port **8888** (Host-Netzwerk) |
 | Konfiguration | persistent unter `/share/ledfx` |
 | Audio | über den PulseAudio-Server des Supervisors (`audio: true`) |
+| Music Assistant | erscheint als **Sendspin**-Player (Port 8927, optional) |
 
 ---
 
@@ -19,7 +20,7 @@ für Home Assistant OS / Supervised, basierend auf dem offiziellen Container-Ima
 2. [Installation als Custom Repository](#2-installation-als-custom-repository)
 3. [Konfigurationsoptionen](#3-konfigurationsoptionen)
 4. [Web-UI und Seitenleiste](#4-web-ui-und-seitenleiste)
-5. [Audio-Routing aus Music Assistant / Snapcast](#5-audio-routing-aus-music-assistant--snapcast)
+5. [Audio-Routing aus Music Assistant (Sendspin) / Snapcast](#5-audio-routing-aus-music-assistant--snapcast)
 6. [WLED-Geräte einbinden](#6-wled-geräte-einbinden)
 7. [Updates und Rebuild](#7-updates-und-rebuild)
 8. [Vorgebaute Images per GitHub Actions](#8-vorgebaute-images-per-github-actions)
@@ -72,6 +73,8 @@ port: 8888
 log_level: info
 audio_source: ""
 null_sink: false
+sendspin: false
+sendspin_name: LedFx
 offline_mode: false
 ```
 
@@ -82,6 +85,8 @@ offline_mode: false
 | `log_level` | `info` / `debug` / `trace` | `info` | `debug` entspricht `ledfx -v`, `trace` entspricht `-vv`. |
 | `audio_source` | String | `""` | Name der PulseAudio-Quelle, die LedFx aufnimmt (meist eine `*.monitor`-Quelle). Leer = Systemstandard. Siehe Abschnitt 5. |
 | `null_sink` | Bool | `false` | Legt beim Start ein virtuelles Audio-Ziel `ledfx` an und macht es zum Standard-Ausgang. Nötig auf Systemen ohne echte Soundkarte. **Achtung:** ändert den Standard-Ausgang für *alle* Add-ons, TTS-Ansagen landen dann im Nichts. |
+| `sendspin` | Bool | `false` | Startet den Sendspin-Daemon, damit das Add-on in Music Assistant als Player erscheint. Zusammen mit `null_sink: true` benutzen. |
+| `sendspin_name` | String | `LedFx` | Anzeigename des Players in Music Assistant. |
 | `offline_mode` | Bool | `false` | Startet LedFx mit `--offline`: keine Update-Checks, kein Crash-Reporting. |
 
 Nach jeder Änderung: **Speichern** und das Add-on **neu starten**.
@@ -117,6 +122,10 @@ Home-Assistant-Ingress stellt jeder Anfrage ein Präfix
 
 ## 5. Audio-Routing aus Music Assistant / Snapcast
 
+> **Kurzfassung für den Normalfall:** `sendspin: true` + `null_sink: true`
+> setzen, neu starten — fertig. Das Add-on erscheint dann in Music Assistant
+> als Player namens *LedFx*. Die Details dazu stehen in Variante A.
+
 Der Teil, an dem die meisten Setups scheitern — hier Schritt für Schritt.
 
 ### Wie es funktioniert
@@ -126,16 +135,20 @@ Audio-Plugin des Supervisors). Alle Add-ons mit `audio: true` hängen am selben
 Server:
 
 ```
-Music Assistant ──► Snapcast-Server ──► Snapcast-Client-Add-on
-                                               │  (spielt ab)
-                                               ▼
-                                    PulseAudio-Sink  "ledfx"
-                                               │
-                                      Monitor-Quelle "ledfx.monitor"
-                                               │  (nimmt auf)
-                                               ▼
-                                         LedFx Add-on ──► WLED (DDP/E1.31)
+Music Assistant ──► Sendspin ──► Sendspin-Daemon im LedFx-Add-on
+                                          │  (spielt ab)
+                                          ▼
+                               PulseAudio-Sink  "ledfx"
+                                          │
+                                 Monitor-Quelle "ledfx.monitor"
+                                          │  (nimmt auf)
+                                          ▼
+                                    LedFx ──► WLED (DDP/E1.31)
 ```
+
+Der Sendspin-Daemon steckt mit im Add-on. Music Assistant sieht das Add-on
+damit als ganz normalen Player und schickt Musik direkt dorthin — es braucht
+kein zweites Add-on und keinen Snapcast-Server dazwischen.
 
 Jedes Sink besitzt automatisch eine **Monitor-Quelle**. LedFx nimmt diese auf
 und analysiert damit exakt das, was gerade abgespielt wird — ohne Mikrofon,
@@ -161,7 +174,38 @@ Wer eine echte Soundkarte oder einen HDMI-Ausgang nutzt, lässt
 
 ### Schritt 2 – Audioquelle ins Sink schicken
 
-**Variante A: Music Assistant + Snapcast**
+**Variante A (empfohlen): Sendspin — das Add-on selbst als Player**
+
+Sendspin ist das eigene Player-Protokoll von Music Assistant. Es ist dort
+eingebaut, immer aktiv und findet Geräte per mDNS von allein. Dieses Add-on
+bringt einen Sendspin-Daemon mit, das heißt: **kein zweites Add-on, kein
+Snapcast-Server, keine IP-Eintragerei.**
+
+1. *LedFx → Konfiguration →* `sendspin: true` und `null_sink: true` setzen,
+   bei Bedarf `sendspin_name` anpassen. Speichern, Add-on neu starten.
+2. Im Add-on-Log erscheint:
+
+   ```
+   [ledfx] Starte Sendspin-Daemon als "LedFx" (Port 8927).
+   ```
+
+3. In Music Assistant unter *Einstellungen → Player* auftauchen lassen — der
+   Player erscheint nach wenigen Sekunden von selbst. Nichts hinzufügen, nichts
+   konfigurieren.
+4. Musik auf diesen Player abspielen. Der Ton landet im Sink `ledfx`, LedFx
+   nimmt dessen Monitor auf.
+
+> **Pairing:** Music Assistant zeigt bei jedem Sendspin-Player oben seinen
+> Sicherheitsstatus. Beim ersten Verbinden gegebenenfalls über **Setup** am
+> Player die Verbindung bestätigen.
+
+> **Port 8927** muss auf dem Host frei sein — das Add-on läuft im Host-Netzwerk.
+
+> **Technical Preview:** Sendspin ist laut Music Assistant noch im technischen
+> Vorschau-Stadium. Funktioniert, kann sich aber ändern. Wenn etwas klemmt, sind
+> die Varianten B–D der stabile Rückfallweg.
+
+**Variante B: Music Assistant + Snapcast**
 
 1. In Music Assistant den **Snapcast**-Player-Provider aktivieren
    (*Einstellungen → Player-Provider → Snapcast hinzufügen*). Music Assistant
@@ -176,12 +220,12 @@ Wer eine echte Soundkarte oder einen HDMI-Ausgang nutzt, lässt
 4. Snapcast-Client starten und in Music Assistant Musik auf diesen Client
    abspielen.
 
-**Variante B: Squeezelite / LMS**
+**Variante C: Squeezelite / LMS**
 
 Das Add-on **Squeezelite** installieren, als Ausgabegerät `pulse` bzw. `ledfx`
 setzen und aus Logitech Media Server / Music Assistant darauf streamen.
 
-**Variante C: Line-In / USB-Soundkarte**
+**Variante D: Line-In / USB-Soundkarte**
 
 USB-Audio-Interface an den Pi stecken. Die zugehörige Quelle taucht ohne
 Zusatzkonfiguration in der Liste aus Schritt 3 auf (`alsa_input.usb-...`).
@@ -296,6 +340,8 @@ Optional, aber deutlich schneller als der lokale Build auf dem Pi.
 | Keine Audioquelle in LedFx sichtbar | Abschnitt 5, Schritt 3: ist `pulse`/`default` ausgewählt? Listet das Log überhaupt Quellen? |
 | Pegelanzeige bleibt bei 0 | Es läuft nichts in das Sink. Zuerst im Log des Snapcast-/Squeezelite-Add-ons prüfen, ob es wirklich abspielt, dann die richtige `.monitor`-Quelle wählen. |
 | WLED wird nicht gefunden | Host-Netzwerk aktiv? Gleiches Subnetz? IP manuell eintragen. |
+| Player taucht in Music Assistant nicht auf | Log auf `Starte Sendspin-Daemon` prüfen. Ist Port 8927 auf dem Host frei? MA und HA im selben Layer-2-Netz (mDNS)? |
+| `FEHLER: Sendspin-Client fehlt im Image` | Das Add-on wurde vor dem Einbau von Sendspin gebaut — Version hochzählen und neu bauen (Abschnitt 7). |
 | Effekte ruckeln auf dem Pi 5 | Framerate in LedFx reduzieren (*Settings → Core → FPS*), weniger Geräte parallel bedienen. |
 | Nach Update immer noch alte LedFx-Version | Add-on-`version` hochzählen und neu bauen (Abschnitt 7). |
 
@@ -310,6 +356,7 @@ setzen.
 .
 ├── README.md
 ├── repository.yaml               # macht das Repo zum HA-Add-on-Store-Repository
+├── test_run.sh                   # Selbsttest fuer run.sh (sh test_run.sh)
 ├── .github/
 │   └── workflows/
 │       └── builder.yaml          # Multi-Arch-Build nach ghcr.io (optional)
@@ -317,7 +364,7 @@ setzen.
     ├── config.yaml               # Add-on-Definition (Schema, Ports, Rechte)
     ├── build.yaml                # Basis-Images pro Architektur
     ├── Dockerfile                # Ableitung von ghcr.io/ledfx/ledfx:latest
-    └── run.sh                    # Startskript: Optionen, Audio, LedFx-Start
+    └── run.sh                    # Startskript: Optionen, Audio, Sendspin, LedFx
 ```
 
 Vor dem Push in allen Dateien `DEIN-GITHUB-USER` durch den eigenen Account

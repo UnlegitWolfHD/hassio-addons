@@ -38,8 +38,10 @@ map:
 # fuer die Doku und fuer die [PORT:8888]-Ersetzung in webui erhalten.
 ports:
   8888/tcp: 8888
+  8927/tcp: 8927
 ports_description:
   8888/tcp: LedFx Web-UI
+  8927/tcp: Sendspin-Client (Music Assistant), nur bei sendspin=true belegt
 
 # Kein Ingress: LedFx liefert seine Assets unter absoluten Pfaden aus und
 # funktioniert hinter dem Ingress-Praefix nicht. Siehe README -> Seitenleiste.
@@ -55,6 +57,8 @@ options:
   log_level: info
   audio_source: ""
   null_sink: false
+  sendspin: false
+  sendspin_name: LedFx
   offline_mode: false
 
 schema:
@@ -63,4 +67,6 @@ schema:
   log_level: list(info|debug|trace)
   audio_source: str?   # Override fuer das Audio-Dropdown, s. README
   null_sink: bool
+  sendspin: bool
+  sendspin_name: str
   offline_mode: bool

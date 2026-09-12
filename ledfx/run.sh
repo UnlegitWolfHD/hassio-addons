@@ -25,6 +25,8 @@ emit("PORT", "port", 8888)
 emit("LOG_LEVEL", "log_level", "info")
 emit("AUDIO_SOURCE", "audio_source", "")
 emit("NULL_SINK", "null_sink", False)
+emit("SENDSPIN", "sendspin", False)
+emit("SENDSPIN_NAME", "sendspin_name", "LedFx")
 emit("OFFLINE", "offline_mode", False)
 PY
 )"
@@ -69,6 +71,39 @@ else
     echo "[ledfx] WARNUNG: kein PulseAudio-Socket unter /run/audio/pulse.sock."
     echo "[ledfx]           'audio: true' in config.yaml gesetzt? Add-on neu gestartet?"
 fi
+
+# --- Sendspin ----------------------------------------------------------
+# Meldet das Add-on bei Music Assistant als Player an (mDNS, kein Server-URL
+# noetig). Der Ton laeuft dann in den PulseAudio-Sink, dessen Monitor LedFx
+# aufnimmt - Kette: Music Assistant -> Sendspin -> Sink -> LedFx -> WLED.
+case "$SENDSPIN" in
+    True|true|1)
+        if [ ! -x /opt/sendspin/bin/sendspin ]; then
+            echo "[ledfx] FEHLER: Sendspin-Client fehlt im Image. Add-on neu bauen."
+        else
+            SS_CFG="$CONFIG_DIR/.config/sendspin"
+            mkdir -p "$SS_CFG"
+            # MPRIS braucht einen D-Bus-Session-Bus, den es im Container nicht
+            # gibt. Nur als Startwert schreiben - der Daemon pflegt die Datei
+            # danach selbst (Lautstaerke, client_id, Pairing).
+            if [ ! -f "$SS_CFG/settings-daemon.json" ]; then
+                echo '{"use_mpris": false}' > "$SS_CFG/settings-daemon.json"
+            fi
+            case "$NULL_SINK" in
+                True|true|1) ;;
+                *)
+                    echo "[ledfx] HINWEIS: sendspin=true, aber null_sink=false."
+                    echo "[ledfx]          Ohne Audio-Ziel kann Sendspin nichts"
+                    echo "[ledfx]          abspielen - entweder null_sink"
+                    echo "[ledfx]          aktivieren oder eine echte Soundkarte"
+                    echo "[ledfx]          als Standard-Ausgang setzen."
+                    ;;
+            esac
+            echo "[ledfx] Starte Sendspin-Daemon als \"$SENDSPIN_NAME\" (Port 8927)."
+            HOME="$CONFIG_DIR" /opt/sendspin/bin/sendspin daemon                 --name "$SENDSPIN_NAME" --audio-device pulse 2>&1                 | sed 's/^/[sendspin] /' &
+        fi
+        ;;
+esac
 
 # --- LedFx -------------------------------------------------------------
 set -- --host "$HOST" --port "$PORT" --config "$CONFIG_DIR"
