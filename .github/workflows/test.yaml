@@ -57,8 +57,13 @@ jobs:
           # --severity=warning: echte Fehler blockieren, Stilhinweise nicht.
           shellcheck -s sh --severity=warning ledfx/run.sh ledfx/healthcheck.sh test_run.sh
 
-      - name: Selbsttests
+      - name: Selbsttests Add-on
         run: sh test_run.sh
+
+      - name: Selbsttests Home-Assistant-Paket
+        run: |
+          pip install --quiet jinja2 pyyaml
+          python test_ha_package.py
 
       - name: Dockerfile baut
         run: |

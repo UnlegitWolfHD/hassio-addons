@@ -246,3 +246,76 @@ script:
             - action: rest_command.ledfx_randomize
               data:
                 virtual: "{{ repeat.item }}"
+
+# ---------------------------------------------------------------------------
+# Echte Home-Assistant-Lampe fuer ein LedFx-Virtual: an/aus, Helligkeit und
+# Effektauswahl direkt auf der Lampenkarte.
+#
+# Fuer jedes weitere Virtual den Block kopieren und "wled-gledopto" sowie
+# name/unique_id anpassen. Die Virtual-IDs stehen im Attribut "virtuals" von
+# sensor.ledfx_aktive_virtuals.
+#
+# Die Effektliste sind die Modulnamen aus ledfx/effects/ - genau die benutzt
+# LedFx als Effekt-ID (BaseRegistry: name = cls.__module__.split(".")[-1]).
+# Enthalten sind die Kategorien Classic, BPM, Atmospheric und Non-Reactive;
+# 2D-/Matrix-Effekte fehlen bewusst, die brauchen eine Matrix statt eines Strips.
+# ---------------------------------------------------------------------------
+template:
+  - light:
+      - name: "LedFx wled-gledopto"
+        unique_id: ledfx_light_wled_gledopto
+        state: >-
+          {{ (state_attr('sensor.ledfx_aktive_virtuals', 'virtuals') or {})
+             .get('wled-gledopto', {}).get('active', false) }}
+        level: >-
+          {{ ((((state_attr('sensor.ledfx_aktive_virtuals', 'virtuals') or {})
+                .get('wled-gledopto', {}).get('effect', {}).get('config', {})
+                .get('brightness', 1)) | float(1)) * 255) | round(0) }}
+        effect: >-
+          {{ (state_attr('sensor.ledfx_aktive_virtuals', 'virtuals') or {})
+             .get('wled-gledopto', {}).get('effect', {}).get('type', 'melt') }}
+        effect_list: >-
+          {{ [
+          'bar', 'blade_power_plus', 'block_reflections', 'crawler', 'energy',
+          'energy2', 'fade', 'fire', 'glitch', 'lava_lamp', 'magnitude', 'marching',
+          'melt', 'melt_and_sparkle', 'multiBar', 'pitchSpectrum', 'power', 'rain',
+          'rainbow', 'random_flash', 'real_strobe', 'scan', 'scan_and_flare',
+          'scan_multi', 'scroll', 'scroll_plus', 'singleColor', 'spectrum',
+          'spotlight', 'strobe', 'water', 'wavelength'
+          ] }}
+        turn_on:
+          - action: rest_command.ledfx_virtual_power
+            data:
+              virtual: wled-gledopto
+              active: true
+          - delay: "00:00:01"
+          - action: homeassistant.update_entity
+            target:
+              entity_id: sensor.ledfx_aktive_virtuals
+        turn_off:
+          - action: rest_command.ledfx_virtual_power
+            data:
+              virtual: wled-gledopto
+              active: false
+          - delay: "00:00:01"
+          - action: homeassistant.update_entity
+            target:
+              entity_id: sensor.ledfx_aktive_virtuals
+        set_level:
+          - action: rest_command.ledfx_brightness
+            data:
+              virtual: wled-gledopto
+              brightness: "{{ (brightness | float(255)) / 255 }}"
+          - delay: "00:00:01"
+          - action: homeassistant.update_entity
+            target:
+              entity_id: sensor.ledfx_aktive_virtuals
+        set_effect:
+          - action: rest_command.ledfx_effect
+            data:
+              virtual: wled-gledopto
+              effect: "{{ effect }}"
+          - delay: "00:00:01"
+          - action: homeassistant.update_entity
+            target:
+              entity_id: sensor.ledfx_aktive_virtuals

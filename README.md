@@ -102,10 +102,13 @@ oder über den Button **Web-UI öffnen** auf der Add-on-Seite.
 
 ### Warum kein Ingress?
 
-LedFx lädt seine Frontend-Assets über **absolute Pfade** (`/static/...`). Der
-Home-Assistant-Ingress stellt jeder Anfrage ein Präfix
-(`/api/hassio_ingress/<token>/`) voran — die UI bliebe weiß. Deshalb ist in der
-`config.yaml` bewusst kein `ingress: true` gesetzt.
+LedFx kennt keinen Basispfad. In `ledfx/http_manager.py` (v2.1.9) gibt es weder
+`root_path` noch eine Auswertung von `X-Forwarded-*`; `base_url` dient
+ausschließlich der Anzeige. Der Home-Assistant-Ingress stellt jeder Anfrage aber
+ein Präfix voran (`/api/hassio_ingress/<token>/`) — die Assets würden ins Leere
+zeigen und die UI bliebe weiß. Deshalb ist in der `config.yaml` bewusst kein
+`ingress: true` gesetzt. Das ist keine Nachlässigkeit, sondern eine Eigenschaft
+von LedFx.
 
 ### Trotzdem in der Seitenleiste
 
@@ -419,6 +422,26 @@ ausschließlich Szenen schalten.)
 | `sensor.ledfx_szenen` | Anzahl der Szenen; das Attribut `scenes` enthält alle Szenen. |
 | `sensor.ledfx_aktive_virtuals` | Wie viele Virtuals laufen; Attribut `virtuals` mit allen Details. |
 | `sensor.ledfx_version` | LedFx-Version — zugleich Verfügbarkeitsanzeige. |
+| `light.ledfx_wled_gledopto` | Vollwertige HA-Lampe: an/aus, Helligkeitsregler und Effektauswahl direkt auf der Lampenkarte. |
+
+### Die Lampe
+
+Das Paket erzeugt für ein Virtual eine echte `light`-Entität. Sie taucht in
+Dashboards, Sprachassistenten und Automatisierungen auf wie jede andere Lampe —
+mit Helligkeitsregler und einer Auswahl aus 32 Effekten.
+
+Die Effektliste sind die Modulnamen aus `ledfx/effects/`; genau die benutzt LedFx
+intern als Effekt-ID (`BaseRegistry`: `name = cls.__module__.split(".")[-1]`).
+Enthalten sind die Kategorien *Classic*, *BPM*, *Atmospheric* und
+*Non-Reactive*. 2D-/Matrix-Effekte fehlen bewusst — die brauchen eine Matrix,
+keinen Strip.
+
+Für jedes weitere Virtual den `- light:`-Block kopieren und die Virtual-ID sowie
+`name` und `unique_id` anpassen. Die IDs stehen im Attribut `virtuals` von
+`sensor.ledfx_aktive_virtuals`.
+
+> Nach jeder Aktion fragt die Lampe den Sensor aktiv ab, damit die Karte nicht
+> bis zum nächsten Abfrageintervall auf dem alten Stand steht.
 
 ### Dienste für eigene Automatisierungen
 
@@ -531,8 +554,9 @@ setzen.
 ├── README.md
 ├── repository.yaml               # macht das Repo zum HA-Add-on-Store-Repository
 ├── test_run.sh                   # Selbsttest fuer run.sh (sh test_run.sh)
+├── test_ha_package.py            # prueft das HA-Paket (python test_ha_package.py)
 ├── homeassistant/
-│   └── ledfx_package.yaml        # Steuerung aus HA (Szenen, Effekte, Helligkeit)
+│   └── ledfx_package.yaml        # Steuerung aus HA (Lampe, Szenen, Effekte)
 ├── .github/
 │   └── workflows/
 │       ├── builder.yaml          # Multi-Arch-Build nach ghcr.io (optional)
