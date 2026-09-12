@@ -1,6 +1,6 @@
 ---
 name: LedFx
-version: "2.0.0"
+version: "2.1.0"
 slug: ledfx
 description: >-
   Audio-reactive LED-Steuerung fuer WLED & Co. (LedFx, offizielles GHCR-Image)
@@ -33,6 +33,11 @@ full_access: false
 # Persistenz der LedFx-Konfiguration ausserhalb des Containers.
 map:
   - share:rw
+
+# Der Bildcache (bis 500 MB) wird von run.sh nach /data/cache umgelenkt und
+# gehoert nicht ins Backup - er laedt sich bei Bedarf neu.
+backup_exclude:
+  - cache/**
 
 # Bei host_network ignoriert der Supervisor das Port-Mapping; der Eintrag bleibt
 # fuer die Doku und fuer die [PORT:8888]-Ersetzung in webui erhalten.

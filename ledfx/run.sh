@@ -34,6 +34,27 @@ PY
 
 mkdir -p "$CONFIG_DIR"
 
+# --- Bildcache ---------------------------------------------------------
+# LedFx legt seinen Bildcache unter <config>/cache/images an: bis zu 500 MB,
+# ohne automatisches Verfallsdatum ("cache and keep", nur LRU am Limit).
+# In /share landet das in jedem Home-Assistant-Backup. Deshalb auf das
+# Add-on-eigene /data umlenken, das per backup_exclude aus Backups faellt.
+# Ein bereits bestehendes echtes Verzeichnis wird NICHT angefasst.
+if [ -L "$CONFIG_DIR/cache" ]; then
+    :
+elif [ -d "$CONFIG_DIR/cache" ]; then
+    echo "[ledfx] HINWEIS: $CONFIG_DIR/cache ist ein echtes Verzeichnis und"
+    echo "[ledfx]          landet damit in jedem Backup. Zum Umlenken einmal"
+    echo "[ledfx]          loeschen und das Add-on neu starten."
+elif mkdir -p /data/cache 2>/dev/null      && ln -s /data/cache "$CONFIG_DIR/cache" 2>/dev/null; then
+    echo "[ledfx] Bildcache liegt unter /data/cache, ausserhalb der Backups."
+else
+    # Als Bedingung geschrieben, damit "set -e" hier nicht zuschlaegt: ein
+    # nicht umlenkbarer Cache ist ein Schoenheitsfehler, kein Startabbruch.
+    echo "[ledfx] HINWEIS: Bildcache konnte nicht nach /data umgelenkt werden."
+    echo "[ledfx]          LedFx legt ihn dann unter $CONFIG_DIR/cache an."
+fi
+
 # --- Audio -------------------------------------------------------------
 # Das Upstream-Image setzt PULSE_SERVER bereits auf seinen containereigenen
 # PulseAudio-Daemon (/home/ledfx/.config/pulse/pulseaudio.socket) - ein

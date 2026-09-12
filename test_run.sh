@@ -22,6 +22,7 @@ touch "$TMP/pulse.sock"
 # run.sh mit Testpfaden statt Containerpfaden
 sed -e "s|/data/options.json|$TMPW/options.json|g" \
     -e "s|CONFIG_DIR=/share/ledfx|CONFIG_DIR=$TMP/share/ledfx|" \
+    -e "s|/data/cache|$TMP/data/cache|g" \
     -e "s|\[ -S /run/audio/pulse.sock \]|[ -e $TMP/pulse.sock ]|" \
     -e "s|python3 /sendspin_register.py|python3 '$REPOW/ledfx/sendspin_register.py'|g" \
     ledfx/run.sh > "$TMP/run.sh"
@@ -94,6 +95,36 @@ run_case "Null-Sink" '{"null_sink":true}'
 expect "PACTL load-module module-null-sink sink_name=ledfx" "Null-Sink angelegt"
 expect "PACTL set-default-sink ledfx" "Standard-Ausgang gesetzt"
 expect "PULSE_SOURCE=ledfx.monitor" "LedFx nimmt den Monitor auf"
+
+# Bildcache darf den Start nie verhindern, egal ob die Umlenkung klappt.
+rm -rf "$TMP/share/ledfx/cache" "$TMP/data/cache"
+run_case "Bildcache, erste Umlenkung" '{}'
+if grep -qE "Bildcache liegt unter|Bildcache konnte nicht" "$TMP/log"; then
+    echo "  OK   Umlenkung beim ersten Mal gemeldet"
+else
+    echo "  FAIL Cache-Block hat sich gar nicht gemeldet"; FAILED=1
+fi
+expect "LEDFX --host" "LedFx startet trotzdem"
+
+run_case "Bildcache, zweiter Start" '{}'
+if grep -q "Bildcache liegt unter" "$TMP/log"; then
+    echo "  FAIL zweiter Start lenkt erneut um"; FAILED=1
+else
+    echo "  OK   zweiter Start schweigt (idempotent)"
+fi
+
+# Echtes Verzeichnis darf nicht angetastet werden
+rm -rf "$TMP/share/ledfx/cache"
+mkdir -p "$TMP/share/ledfx/cache/images"
+echo "wichtig" > "$TMP/share/ledfx/cache/images/datei"
+run_case "Bildcache als echtes Verzeichnis" '{}'
+expect "ist ein echtes Verzeichnis" "bestehendes Verzeichnis wird gemeldet"
+if [ "$(cat "$TMP/share/ledfx/cache/images/datei" 2>/dev/null)" = "wichtig" ]; then
+    echo "  OK   bestehender Cache blieb unangetastet"
+else
+    echo "  FAIL bestehender Cache wurde zerstoert"; FAILED=1
+fi
+rm -rf "$TMP/share/ledfx/cache"
 
 run_case "Sendspin ohne Server-URL" '{"sendspin":true}'
 expect "sendspin_server ist leer" "fehlende URL wird gemeldet"

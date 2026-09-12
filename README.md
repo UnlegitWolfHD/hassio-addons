@@ -334,6 +334,15 @@ Pull-Limits für nicht angemeldete Clients, deshalb ist GHCR der Default.
 **Backup:** `/share/ledfx` ist Teil der normalen Home-Assistant-Backups. Dort
 liegt `config.json` mit allen Geräten, Szenen und Effekten.
 
+Der **Bildcache** ist davon ausgenommen. LedFx legt ihn normalerweise unter
+`<config>/cache/images` an — bis zu 500 MB, ohne automatisches Verfallsdatum
+(die Cache-Politik lautet ausdrücklich *cache and keep*, aufgeräumt wird erst
+am Limit). In `/share` wäre das in jedem Backup. Das Add-on verlinkt das
+Verzeichnis deshalb beim ersten Start nach `/data/cache` und schließt es per
+`backup_exclude` aus. Ein bereits bestehendes echtes Verzeichnis wird **nicht**
+angefasst — das Add-on weist im Protokoll darauf hin, löschen kannst du es
+selbst. Der Inhalt lädt sich bei Bedarf ohnehin neu nach.
+
 ---
 
 ## 8. Vorgebaute Images per GitHub Actions
