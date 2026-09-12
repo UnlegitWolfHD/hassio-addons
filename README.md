@@ -10,7 +10,7 @@ für Home Assistant OS / Supervised, basierend auf dem offiziellen Container-Ima
 | Web-UI | Port **8888** (Host-Netzwerk) |
 | Konfiguration | persistent unter `/share/ledfx` |
 | Audio | über den PulseAudio-Server des Supervisors (`audio: true`) |
-| Music Assistant | als **Sendspin**-Player - nativ in LedFx oder ueber den mitgelieferten Daemon |
+| Music Assistant | über **Sendspin**, direkt von LedFx (kein Umweg über PulseAudio) |
 
 ---
 
@@ -123,8 +123,9 @@ Home-Assistant-Ingress stellt jeder Anfrage ein Präfix
 
 ## 5. Audio-Routing aus Music Assistant / Snapcast
 
-> **Kurzfassung für den Normalfall:** `sendspin: true` setzen, neu starten — fertig. Das Add-on erscheint dann in Music Assistant
-> als Player namens *LedFx*. Die Details dazu stehen in Variante A.
+> **Kurzfassung für den Normalfall:** `sendspin: true` und
+> `sendspin_server: "ws://<MA-IP>:8927/sendspin"` setzen, neu starten — fertig. Das Add-on erscheint dann in Music Assistant
+> sieht LedFx dann als Audioquelle. Die Details stehen in Variante A.
 
 Der Teil, an dem die meisten Setups scheitern — hier Schritt für Schritt.
 
@@ -135,20 +136,18 @@ Audio-Plugin des Supervisors). Alle Add-ons mit `audio: true` hängen am selben
 Server:
 
 ```
-Music Assistant ──► Sendspin ──► Sendspin-Daemon im LedFx-Add-on
-                                          │  (spielt ab)
-                                          ▼
-                               PulseAudio-Sink  "ledfx"
-                                          │
-                                 Monitor-Quelle "ledfx.monitor"
-                                          │  (nimmt auf)
-                                          ▼
-                                    LedFx ──► WLED (DDP/E1.31)
+Variante A (empfohlen) — LedFx spricht Sendspin selbst:
+
+    Music Assistant ──► Sendspin (Netzwerk) ──► LedFx ──► WLED (DDP/E1.31)
+
+Varianten B–D — über den PulseAudio-Server von Home Assistant:
+
+    Snapcast/Squeezelite-Add-on ──► Sink "ledfx" ──► ledfx.monitor ──► LedFx
 ```
 
-Der Sendspin-Daemon steckt mit im Add-on. Music Assistant sieht das Add-on
-damit als ganz normalen Player und schickt Musik direkt dorthin — es braucht
-kein zweites Add-on und keinen Snapcast-Server dazwischen.
+Variante A braucht den PulseAudio-Umweg gar nicht. Die Varianten B–D nutzen ihn:
+alle Add-ons mit `audio: true` hängen am selben PulseAudio-Server, und jedes Sink
+besitzt automatisch eine Monitor-Quelle, die LedFx aufnehmen kann.
 
 Jedes Sink besitzt automatisch eine **Monitor-Quelle**. LedFx nimmt diese auf
 und analysiert damit exakt das, was gerade abgespielt wird — ohne Mikrofon,
@@ -156,7 +155,10 @@ ohne Kabel, latenzarm.
 
 ### Schritt 1 – Virtuelles Audio-Ziel anlegen
 
-Nur nötig, wenn der Host keine nutzbare Soundkarte hat (typisch für einen
+**Nur für die Varianten B–D.** Wer Variante A benutzt, überspringt diesen
+Schritt komplett — dort fließt kein Ton durch PulseAudio.
+
+Nötig, wenn der Host keine nutzbare Soundkarte hat (typisch für einen
 headless Raspberry Pi 5 ohne HDMI-Ton oder USB-DAC).
 
 *LedFx → Konfiguration →* `null_sink: true` *→ Speichern → Neu starten.*
@@ -174,69 +176,52 @@ Wer eine echte Soundkarte oder einen HDMI-Ausgang nutzt, lässt
 
 ### Schritt 2 – Audioquelle ins Sink schicken
 
-**Variante A0 (am wenigsten Maschinerie): LedFx' eigener Sendspin-Client**
+**Variante A (empfohlen): LedFx' eigener Sendspin-Client**
 
-LedFx 2.1.9 bringt Sendspin selbst mit — im Paket steckt `ledfx/sendspin/` und
+LedFx 2.1.9 bringt Sendspin selbst mit — im Paket steckt `ledfx/sendspin/`,
 `aiosendspin` ist eine feste Abhängigkeit. LedFx hängt sich damit direkt an
-Music Assistant, **ohne** den Daemon dieses Add-ons, ohne Null-Sink und ohne
-den Umweg über PulseAudio.
+Music Assistant: **kein PulseAudio, kein Null-Sink, kein zusätzlicher Daemon.**
+Die Audiodaten kommen über das Netzwerk, LedFx analysiert sie unmittelbar.
 
-Die Geräteliste startet leer (`SENDSPIN_SERVERS = {}`), der Server muss also
-einmalig registriert werden. Erst suchen lassen:
+Die Geräteliste in LedFx startet leer (`SENDSPIN_SERVERS = {}`) — der Server
+muss einmalig registriert werden. Das erledigt das Add-on für dich:
 
-```bash
-curl http://<HA-IP>:8888/api/sendspin/discover
-```
+1. *LedFx → Konfiguration:*
 
-Oder direkt eintragen:
-
-```bash
-curl -X POST http://<HA-IP>:8888/api/sendspin/servers -H "Content-Type: application/json" -d '{"id":"music-assistant","server_url":"ws://<MA-IP>:8927/sendspin","client_name":"LedFx"}'
-```
-
-Danach in LedFx die Seite neu laden: im Audio-Dropdown steht ein Eintrag
-`SENDSPIN: music-assistant`. Den auswählen. Der Eintrag landet in
-`/share/ledfx/config.json` und übersteht Neustarts.
-
-Wenn das funktioniert, im Add-on `sendspin: false` setzen — sonst konkurrieren
-zwei Clients um denselben Stream und um Port 8927.
-
-**Variante A (mitgelieferter Daemon): das Add-on meldet sich selbst an**
-
-Falls der native Weg klemmt: dieses Add-on bringt einen eigenständigen
-Sendspin-Daemon mit, der sich per mDNS von allein bei Music Assistant meldet —
-kein zweites Add-on, kein Snapcast-Server, keine IP-Eintragerei.
-
-1. *LedFx → Konfiguration →* `sendspin: true` setzen, bei Bedarf
-   `sendspin_name` anpassen. Speichern, Add-on neu starten.
-   `null_sink` muss **nicht** gesetzt werden: hat PulseAudio überhaupt kein
-   Ausgabeziel, legt das Add-on selbst eines an. Existierende Sinks (echte
-   Soundkarte, HDMI) bleiben unangetastet.
-2. Im Add-on-Log erscheint:
-
-   ```
-   [ledfx] Starte Sendspin-Daemon als 'LedFx' (Port 8927).
-   [ledfx] Sendspin laeuft (PID 42).
+   ```yaml
+   sendspin: true
+   sendspin_server: "ws://192.168.1.50:8927/sendspin"
+   sendspin_name: LedFx
    ```
 
-   Steht dort stattdessen `Sendspin wurde sofort beendet`, verrät die
-   darauffolgende `[sendspin]`-Zeile den Grund.
+   Die IP ist die deines **Music-Assistant**-Hosts. Läuft MA als Add-on auf
+   demselben Home Assistant, ist es dessen IP.
 
-3. In Music Assistant unter *Einstellungen → Player* auftauchen lassen — der
-   Player erscheint nach wenigen Sekunden von selbst. Nichts hinzufügen, nichts
-   konfigurieren.
-4. Musik auf diesen Player abspielen. Der Ton landet im Sink `ledfx`, LedFx
-   nimmt dessen Monitor auf.
+2. Speichern, Add-on neu starten. Im Protokoll steht dann:
 
-> **Pairing:** Music Assistant zeigt bei jedem Sendspin-Player oben seinen
-> Sicherheitsstatus. Beim ersten Verbinden gegebenenfalls über **Setup** am
-> Player die Verbindung bestätigen.
+   ```
+   [sendspin] Server 'music-assistant' eingetragen: ws://192.168.1.50:8927/sendspin (Client 'LedFx').
+   ```
 
-> **Port 8927** muss auf dem Host frei sein — das Add-on läuft im Host-Netzwerk.
+3. In LedFx unter *Settings → Audio* das Gerät **`SENDSPIN: music-assistant`**
+   auswählen.
 
-> **Technical Preview:** Sendspin ist laut Music Assistant noch im technischen
-> Vorschau-Stadium. Funktioniert, kann sich aber ändern. Wenn etwas klemmt, sind
-> die Varianten B–D der stabile Rückfallweg.
+Der Eintrag landet in `/share/ledfx/config.json` und übersteht Neustarts,
+Updates und Rebuilds. Ein zweiter Start ändert nichts — das Add-on schreibt nur,
+wenn der Eintrag fehlt oder auf eine andere Adresse zeigt. Eine unlesbare
+`config.json` wird nie überschrieben, sondern gemeldet.
+
+> **Beim allerersten Start** existiert `/share/ledfx/config.json` noch nicht.
+> Das Add-on meldet dann `Eintrag folgt beim naechsten Start` — einmal neu
+> starten, dann sitzt er.
+
+> **Falls du die Adresse nicht kennst:** LedFx kann suchen.
+> `curl http://<HA-IP>:8888/api/sendspin/discover` listet gefundene Server samt
+> URL auf.
+
+> **Technical Preview:** Music Assistant stuft Sendspin selbst noch als
+> Vorschau ein. Wenn es klemmt, sind die Varianten B–D der stabile Rückfallweg —
+> die laufen über PulseAudio und brauchen dann `null_sink: true`.
 
 **Variante B: Music Assistant + Snapcast**
 
@@ -330,7 +315,13 @@ LedFx-Version zu ziehen:
 Die Konfiguration unter `/share/ledfx` bleibt erhalten; ein Rebuild löscht
 ausschließlich den Container.
 
-**Feste Version statt `latest`:** `ghcr.io/ledfx/ledfx` ist mit reinen
+**Das Basis-Image ist gepinnt.** `ledfx/build.yaml` zeigt auf
+`ghcr.io/ledfx/ledfx:2.1.9` statt auf `:latest`. Ein Rebuild liefert damit
+immer dieselbe LedFx-Version — mit `:latest` bekäme man bei jedem Rebuild eine
+unbekannte Version samt möglicher Regressionen. Zum Aktualisieren den Tag dort
+**und** die `version` in `config.yaml` hochzählen.
+
+**Ältere Hinweise dazu:** `ghcr.io/ledfx/ledfx` ist mit reinen
 Versionsnummern getaggt (`2.1.9`, **ohne** `v`-Präfix). Wer reproduzierbare
 Builds will, trägt das in `ledfx/build.yaml` unter `build_from` ein. Als
 Spiegel existiert `ledfxorg/ledfx` auf Docker Hub — dort gelten allerdings
@@ -401,8 +392,9 @@ der Watchdog würde das Add-on in einer Schleife neu starten.
 | Pegelanzeige bleibt bei 0 | Es läuft nichts in das Sink. Zuerst im Log des Snapcast-/Squeezelite-Add-ons prüfen, ob es wirklich abspielt, dann die richtige `.monitor`-Quelle wählen. |
 | WLED wird nicht gefunden | Host-Netzwerk aktiv? Gleiches Subnetz? IP manuell eintragen. |
 | Add-on bleibt dauerhaft auf „wird gestartet“ | Antwortet die Web-UI auf dem konfigurierten Port? Siehe Abschnitt 8a. Bis Version 1.1.0 war das ein Fehler im Add-on selbst. |
-| Player taucht in Music Assistant nicht auf | Log auf `Starte Sendspin-Daemon` prüfen. Ist Port 8927 auf dem Host frei? MA und HA im selben Layer-2-Netz (mDNS)? |
-| `FEHLER: Sendspin-Client fehlt im Image` | Das Add-on wurde vor dem Einbau von Sendspin gebaut — Version hochzählen und neu bauen (Abschnitt 7). |
+| `SENDSPIN: …` fehlt im Audio-Dropdown | Steht im Protokoll `Server 'music-assistant' eingetragen`? Beim allerersten Start existiert `config.json` noch nicht — einmal neu starten. |
+| `sendspin_server ist leer` | Die WebSocket-Adresse von Music Assistant fehlt. `curl http://<HA-IP>:8888/api/sendspin/discover` findet sie. |
+| `config.json nicht lesbar` | Die LedFx-Konfiguration ist beschädigt. Das Add-on rührt sie dann nicht an — Datei prüfen oder aus dem Backup holen. |
 | Effekte ruckeln auf dem Pi 5 | Framerate in LedFx reduzieren (*Settings → Core → FPS*), weniger Geräte parallel bedienen. |
 | Nach Update immer noch alte LedFx-Version | Add-on-`version` hochzählen und neu bauen (Abschnitt 7). |
 
@@ -428,6 +420,7 @@ setzen.
     ├── Dockerfile                # Ableitung von ghcr.io/ledfx/ledfx:latest
     ├── run.sh                    # Startskript: Optionen, Audio, Sendspin, LedFx
     ├── healthcheck.sh            # bestimmt den Add-on-Zustand in HA
+    ├── sendspin_register.py      # traegt Music Assistant in LedFx ein
     ├── DOCS.md                   # Dokumentations-Tab auf der Add-on-Seite
     └── translations/             # Beschriftung der Optionen (de, en)
 ```

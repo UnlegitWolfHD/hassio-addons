@@ -15,23 +15,22 @@ WLED-Einrichtung und Fehlersuche — steht in der
 
 ## Music Assistant
 
-LedFx 2.1.9 bringt Sendspin selbst mit. Den Music-Assistant-Server einmalig
-registrieren:
+LedFx 2.1.9 bringt Sendspin selbst mit. In der Konfiguration setzen:
 
-```bash
-curl -X POST http://<HA-IP>:8888/api/sendspin/servers -H "Content-Type: application/json" -d '{"id":"music-assistant","server_url":"ws://<MA-IP>:8927/sendspin","client_name":"LedFx"}'
+```yaml
+sendspin: true
+sendspin_server: "ws://<MA-IP>:8927/sendspin"
 ```
 
-Danach erscheint im Audio-Dropdown ein Eintrag `SENDSPIN: music-assistant`.
+Nach dem Neustart steht im Audio-Dropdown von LedFx ein Eintrag
+`SENDSPIN: music-assistant`. Auswählen — fertig. Es fließt dabei kein Ton durch
+PulseAudio, LedFx bekommt den Stream direkt über das Netzwerk.
 
-Alternativ startet die Option `sendspin` einen eigenständigen Sendspin-Daemon
-im Add-on. Beides gleichzeitig zu benutzen ist nicht sinnvoll — beide Wege
-belegen Port 8927.
+Adresse unbekannt? `curl http://<HA-IP>:8888/api/sendspin/discover` sucht.
 
 ## Wichtige Hinweise
 
-- Das Add-on läuft im **Host-Netzwerk**. Port 8888 (und bei aktivem Sendspin
-  8927) müssen auf dem Host frei sein.
+- Das Add-on läuft im **Host-Netzwerk**. Port 8888 muss auf dem Host frei sein.
 - Die Konfiguration liegt dauerhaft unter `/share/ledfx` und übersteht
   Neustarts, Updates und Rebuilds.
 - Nach dem Start dauert es bis zu 90 Sekunden, bis Home Assistant das Add-on

@@ -20,18 +20,24 @@ configuration:
   null_sink:
     name: Force a virtual audio target
     description: >-
-      Creates a sink named "ledfx" and makes it the default output for ALL
-      add-ons. Usually unnecessary - with Sendspin enabled one is created
-      automatically if no sink exists at all.
+      Only needed for Snapcast, Squeezelite or line-in: creates a sink nam
+      ed 'ledfx' and makes it the default output for ALL add-ons. Not requ
+      ired for the Music Assistant connection.
   sendspin:
-    name: Register as a Sendspin player
+    name: Connect to Music Assistant
     description: >-
-      Starts a Sendspin daemon so the add-on shows up as a player in Music
-      Assistant. LedFx 2.1.9 can also do Sendspin natively - see the docs.
+      Registers the Music Assistant Sendspin server in the LedFx configura
+      tion. LedFx then connects to it directly, with no PulseAudio detour.
+      Requires sendspin_server.
+  sendspin_server:
+    name: Music Assistant Sendspin address
+    description: >-
+      WebSocket address of the Music Assistant server, e.g.
+      ws://192.168.1.50:8927/sendspin
   sendspin_name:
-    name: Sendspin player name
+    name: Client name
     description: >-
-      The name the add-on appears under in Music Assistant.
+      The name LedFx registers under in Music Assistant.
   offline_mode:
     name: Offline mode
     description: >-

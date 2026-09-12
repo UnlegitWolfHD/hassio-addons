@@ -20,19 +20,24 @@ configuration:
   null_sink:
     name: Virtuelles Audio-Ziel erzwingen
     description: >-
-      Legt ein Sink "ledfx" an und macht es zum Standard-Ausgang fuer ALLE
-      Add-ons. Meist unnoetig - bei aktivem Sendspin wird eines automatisch
-      angelegt, falls gar keines existiert.
+      Nur fuer Snapcast, Squeezelite oder Line-In noetig: legt ein Sink 'l
+      edfx' an und macht es zum Standard-Ausgang fuer ALLE Add-ons. Fuer d
+      ie Verbindung mit Music Assistant nicht erforderlich.
   sendspin:
-    name: Als Sendspin-Player anmelden
+    name: Mit Music Assistant verbinden
     description: >-
-      Startet einen Sendspin-Daemon, damit das Add-on in Music Assistant als
-      Player erscheint. LedFx 2.1.9 kann Sendspin auch selbst - siehe
-      Dokumentation.
+      Traegt den Sendspin-Server von Music Assistant in die LedFx-Konfigur
+      ation ein. LedFx verbindet sich dann selbst damit - ohne Umweg ueber
+      PulseAudio. Benoetigt sendspin_server.
+  sendspin_server:
+    name: Sendspin-Adresse von Music Assistant
+    description: >-
+      WebSocket-Adresse des Music-Assistant-Servers, z. B.
+      ws://192.168.1.50:8927/sendspin
   sendspin_name:
-    name: Name des Sendspin-Players
+    name: Client-Name
     description: >-
-      Unter diesem Namen erscheint das Add-on in Music Assistant.
+      Unter diesem Namen meldet sich LedFx bei Music Assistant an.
   offline_mode:
     name: Offline-Modus
     description: >-

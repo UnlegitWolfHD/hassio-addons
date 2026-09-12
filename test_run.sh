@@ -10,7 +10,11 @@ trap 'rm -rf "$TMP"' EXIT
 # MSYS-Form (/tmp/...), das in run.sh eingebettete Python als natives
 # Windows-Programm aber C:/... - sonst sucht es die Optionsdatei in C:/tmp.
 TMPW="$TMP"
-if command -v cygpath >/dev/null 2>&1; then TMPW=$(cygpath -m "$TMP"); fi
+REPOW="$PWD"
+if command -v cygpath >/dev/null 2>&1; then
+    TMPW=$(cygpath -m "$TMP")
+    REPOW=$(cygpath -m "$PWD")
+fi
 BIN="$TMP/bin"
 mkdir -p "$BIN"
 touch "$TMP/pulse.sock"
@@ -19,7 +23,7 @@ touch "$TMP/pulse.sock"
 sed -e "s|/data/options.json|$TMPW/options.json|g" \
     -e "s|CONFIG_DIR=/share/ledfx|CONFIG_DIR=$TMP/share/ledfx|" \
     -e "s|\[ -S /run/audio/pulse.sock \]|[ -e $TMP/pulse.sock ]|" \
-    -e "s|/opt/sendspin/bin/sendspin|$BIN/sendspin|g" \
+    -e "s|python3 /sendspin_register.py|python3 '$REPOW/ledfx/sendspin_register.py'|g" \
     ledfx/run.sh > "$TMP/run.sh"
 
 cat > "$BIN/pactl" <<'EOS'
@@ -45,16 +49,13 @@ fi
 [ "$1" = "load-module" ] && touch "$STATE/nullsink"
 exit 0
 EOS
-cat > "$BIN/sendspin" <<'EOS'
-#!/bin/sh
-echo "SENDSPIN $* HOME=$HOME" >> "$LOG"
-EOS
+
 cat > "$BIN/ledfx" <<'EOS'
 #!/bin/sh
 echo "LEDFX $*" >> "$LOG"
 echo "ENV PULSE_SERVER=$PULSE_SERVER PULSE_SOURCE=${PULSE_SOURCE-<unset>} PULSE_COOKIE=${PULSE_COOKIE-<unset>}" >> "$LOG"
 EOS
-chmod +x "$BIN"/pactl "$BIN"/sendspin "$BIN"/ledfx
+chmod +x "$BIN"/pactl "$BIN"/ledfx
 
 run_case() {   # run_case <name> <options-json>
     NAME="$1"
@@ -94,34 +95,41 @@ expect "PACTL load-module module-null-sink sink_name=ledfx" "Null-Sink angelegt"
 expect "PACTL set-default-sink ledfx" "Standard-Ausgang gesetzt"
 expect "PULSE_SOURCE=ledfx.monitor" "LedFx nimmt den Monitor auf"
 
-run_case "Sendspin + Null-Sink" '{"sendspin":true,"sendspin_name":"Wohnzimmer","null_sink":true}'
-expect "SENDSPIN daemon --name Wohnzimmer --audio-device pulse" "Daemon mit Namen gestartet"
-expect "HOME=$TMP/share/ledfx" "Sendspin-Config liegt persistent"
-expect "PULSE_SOURCE=ledfx.monitor" "Kette Sendspin -> Sink -> LedFx"
+run_case "Sendspin ohne Server-URL" '{"sendspin":true}'
+expect "sendspin_server ist leer" "fehlende URL wird gemeldet"
 
-FAKE_SINKS=""
-run_case "Sendspin, PulseAudio ohne jedes Ausgabeziel" '{"sendspin":true}'
-expect "PulseAudio hat kein Ausgabeziel" "Mangel erkannt"
-expect "PACTL load-module module-null-sink sink_name=ledfx" "Sink automatisch angelegt"
-expect "PULSE_SOURCE=ledfx.monitor" "LedFx auf den neuen Monitor gesetzt"
-expect "SENDSPIN daemon --name LedFx" "Daemon trotzdem gestartet"
-expect "Daemon beendet (Exit 0)" "Exit-Code des Daemons landet im Protokoll"
-expect "Sendspin wurde sofort beendet" "toter Daemon wird gemeldet"
+# LedFx-Konfiguration vorbereiten, damit das Registrierungsskript sie findet
+mkdir -p "$TMP/share/ledfx"
+echo '{"configuration_version":"2.3.6","devices":[]}' > "$TMP/share/ledfx/config.json"
+run_case "Sendspin mit Server-URL" '{"sendspin":true,"sendspin_server":"ws://10.0.0.5:8927/sendspin","sendspin_name":"Wohnzimmer"}'
+expect "eingetragen: ws://10.0.0.5:8927/sendspin" "Server in config.json eingetragen"
 
-FAKE_SINKS=1
-run_case "Sendspin mit vorhandener Soundkarte" '{"sendspin":true}'
-if grep -q "load-module" "$TMP/log"; then
-    echo "  FAIL vorhandene Hardware wurde ueberschrieben"; FAILED=1
+echo "--- Registrierung in der LedFx-Konfiguration"
+python - "$TMPW/share/ledfx/config.json" <<'PYEOF'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+entry = cfg["sendspin_servers"]["music-assistant"]
+assert entry["server_url"] == "ws://10.0.0.5:8927/sendspin", entry
+assert entry["client_name"] == "Wohnzimmer", entry
+assert cfg["configuration_version"] == "2.3.6", "bestehende Konfiguration ueberlebt nicht"
+assert cfg["devices"] == [], "bestehende Konfiguration ueberlebt nicht"
+print("  OK   Eintrag korrekt, restliche Konfiguration unangetastet")
+PYEOF
+
+# Zweiter Lauf darf nichts doppeln
+run_case "Sendspin erneut (idempotent)" '{"sendspin":true,"sendspin_server":"ws://10.0.0.5:8927/sendspin","sendspin_name":"Wohnzimmer"}'
+expect "ist bereits eingetragen" "zweiter Start aendert nichts"
+
+# Kaputte Konfiguration darf nicht ueberschrieben werden
+echo 'kein json' > "$TMP/share/ledfx/config.json"
+run_case "Sendspin mit defekter config.json" '{"sendspin":true,"sendspin_server":"ws://10.0.0.5:8927/sendspin"}'
+expect "nicht lesbar" "defekte Konfiguration wird gemeldet"
+if [ "$(cat "$TMP/share/ledfx/config.json")" = "kein json" ]; then
+    echo "  OK   defekte Konfiguration blieb unveraendert"
 else
-    echo "  OK   vorhandene Hardware unangetastet (kein Null-Sink)"
+    echo "  FAIL defekte Konfiguration wurde ueberschrieben"; FAILED=1
 fi
-expect "PULSE_SOURCE=<unset>" "Audio-Dropdown von HA behaelt die Kontrolle"
-FAKE_SINKS=""
-
-echo
-[ -f "$TMP/share/ledfx/.config/sendspin/settings-daemon.json" ] \
-  && echo "  OK   settings-daemon.json angelegt: $(cat "$TMP/share/ledfx/.config/sendspin/settings-daemon.json")" \
-  || { echo "  FAIL settings-daemon.json fehlt"; FAILED=1; }
+rm -f "$TMP/share/ledfx/config.json"
 
 # --- healthcheck.sh ------------------------------------------------------
 # Der Add-on-Zustand in Home Assistant haengt daran: meldet der Healthcheck nie

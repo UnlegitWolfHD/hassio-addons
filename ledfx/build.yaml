@@ -6,13 +6,15 @@
 # linux/amd64 + linux/arm64 (Debian trixie, Python 3.12) und zeigt aktuell auf
 # denselben Digest wie der Tag 2.1.9.
 #
-# Reproduzierbare Builds: statt :latest eine Version pinnen, z. B.
-#   aarch64: ghcr.io/ledfx/ledfx:2.1.9        (ohne "v"-Praefix!)
-# Alternative Registry (Spiegel, aber mit Docker-Hub-Pull-Limits):
-#   aarch64: ledfxorg/ledfx:latest
+# Bewusst gepinnt statt :latest. Ein Add-on-Rebuild passiert nur beim Hochzaehlen
+# der Version - mit :latest bekaeme man dabei jedes Mal eine unbekannte
+# LedFx-Version, inklusive Regressionen. 2.1.9 ist die Version, gegen die dieses
+# Add-on geprueft ist (und die erste mit eingebautem Sendspin-Client).
+# Aktualisieren: Tag hier hochzaehlen UND version in config.yaml erhoehen.
+# Tags tragen kein "v"-Praefix. Spiegel mit Docker-Hub-Pull-Limits: ledfxorg/ledfx
 build_from:
-  aarch64: ghcr.io/ledfx/ledfx:latest
-  amd64: ghcr.io/ledfx/ledfx:latest
+  aarch64: ghcr.io/ledfx/ledfx:2.1.9
+  amd64: ghcr.io/ledfx/ledfx:2.1.9
 
 labels:
   org.opencontainers.image.title: "LedFx Home Assistant Add-on"

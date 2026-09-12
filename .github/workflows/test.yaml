@@ -41,6 +41,9 @@ jobs:
           print('ok')
           "
 
+      - name: Python-Syntax
+        run: python -m py_compile ledfx/sendspin_register.py && echo ok
+
       - name: Shell-Syntax
         run: |
           for f in ledfx/run.sh ledfx/healthcheck.sh test_run.sh; do

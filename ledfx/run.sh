@@ -27,6 +27,7 @@ emit("AUDIO_SOURCE", "audio_source", "")
 emit("NULL_SINK", "null_sink", False)
 emit("SENDSPIN", "sendspin", False)
 emit("SENDSPIN_NAME", "sendspin_name", "LedFx")
+emit("SENDSPIN_SERVER", "sendspin_server", "")
 emit("OFFLINE", "offline_mode", False)
 PY
 )"
@@ -59,20 +60,6 @@ case "$NULL_SINK" in
     True|true|1) ensure_null_sink ;;
 esac
 
-# Sendspin braucht zwingend ein Ausgabeziel. Hat PulseAudio ueberhaupt keins
-# (headless Pi ohne Soundkarte), ist das Null-Sink die einzige Moeglichkeit
-# abzuspielen - dann ohne Nachfrage anlegen. Gibt es schon Sinks, wird nichts
-# angefasst, damit echte Hardware Standard-Ausgang bleibt.
-case "$SENDSPIN" in
-    True|true|1)
-        if [ "$(pactl list short sinks 2>/dev/null | wc -l)" -eq 0 ]; then
-            echo "[ledfx] PulseAudio hat kein Ausgabeziel - lege fuer Sendspin"
-            echo "[ledfx] automatisch eins an."
-            ensure_null_sink
-        fi
-        ;;
-esac
-
 if [ -n "$AUDIO_SOURCE" ]; then
     # Von libpulse/ALSA-Plugin ausgewertet: legt die Aufnahmequelle fest.
     export PULSE_SOURCE="$AUDIO_SOURCE"
@@ -90,39 +77,18 @@ else
 fi
 
 # --- Sendspin ----------------------------------------------------------
-# Meldet das Add-on bei Music Assistant als Player an (mDNS, kein Server-URL
-# noetig). Der Ton laeuft in den Standard-Sink, dessen Monitor LedFx aufnimmt -
-# Kette: Music Assistant -> Sendspin -> Sink -> LedFx -> WLED.
+# LedFx 2.1.9 bringt einen eigenen Sendspin-Client mit. Wir tragen nur den
+# Server ein - LedFx verbindet sich dann selbst mit Music Assistant, ohne
+# PulseAudio, ohne Null-Sink und ohne zusaetzlichen Daemon im Container.
 case "$SENDSPIN" in
     True|true|1)
-        if [ ! -x /opt/sendspin/bin/sendspin ]; then
-            echo "[ledfx] FEHLER: Sendspin-Client fehlt im Image. Add-on neu bauen."
+        if [ -z "$SENDSPIN_SERVER" ]; then
+            echo "[ledfx] HINWEIS: sendspin=true, aber sendspin_server ist leer."
+            echo "[ledfx]          Trage dort die WebSocket-Adresse von Music"
+            echo "[ledfx]          Assistant ein, z. B.:"
+            echo "[ledfx]            ws://192.168.1.50:8927/sendspin"
         else
-            SS_CFG="$CONFIG_DIR/.config/sendspin"
-            mkdir -p "$SS_CFG"
-            # MPRIS braucht einen D-Bus-Session-Bus, den es im Container nicht
-            # gibt. Nur als Startwert schreiben - der Daemon pflegt die Datei
-            # danach selbst (Lautstaerke, client_id, Pairing).
-            if [ ! -f "$SS_CFG/settings-daemon.json" ]; then
-                echo '{"use_mpris": false}' > "$SS_CFG/settings-daemon.json"
-            fi
-            echo "[ledfx] Starte Sendspin-Daemon als '$SENDSPIN_NAME' (Port 8927)."
-            # Exit-Code mitloggen: stirbt der Daemon still, sieht man sonst
-            # ueberhaupt nichts im Protokoll.
-            # sed -u ist Pflicht: ohne das puffert sed blockweise, solange
-            # stdout kein Terminal ist - im Docker-Log erscheint dann selbst
-            # von einem laufenden Daemon minutenlang gar nichts.
-            (
-                HOME="$CONFIG_DIR" /opt/sendspin/bin/sendspin daemon --name "$SENDSPIN_NAME" --audio-device pulse 2>&1
-                echo "Daemon beendet (Exit $?)."
-            ) | sed -u 's/^/[sendspin] /' &
-            SS_PID=$!
-            sleep 2
-            if kill -0 "$SS_PID" 2>/dev/null; then
-                echo "[ledfx] Sendspin laeuft (PID $SS_PID)."
-            else
-                echo "[ledfx] Sendspin wurde sofort beendet - siehe [sendspin]-Zeilen."
-            fi
+            python3 /sendspin_register.py                 "$CONFIG_DIR/config.json"                 "music-assistant"                 "$SENDSPIN_SERVER"                 "$SENDSPIN_NAME"
         fi
         ;;
 esac
