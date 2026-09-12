@@ -189,6 +189,18 @@ Zusatzkonfiguration in der Liste aus Schritt 3 auf (`alsa_input.usb-...`).
 
 ### Schritt 3 – Quelle in LedFx auswählen
 
+**Der normale Weg: das Audio-Dropdown von Home Assistant.** Weil das Add-on
+`audio: true` setzt, blendet Home Assistant auf der Add-on-Seite unter
+*Konfiguration* die Auswahlfelder **Audio-Eingang** und **Audio-Ausgang** ein.
+Der Supervisor schreibt die Auswahl als `default-source` in die
+PulseAudio-Client-Konfiguration des Add-ons. Dort also die gewünschte
+Monitor-Quelle wählen und das Add-on neu starten — die Option `audio_source`
+bleibt dann leer.
+
+**Falls die gewünschte Quelle im Dropdown fehlt** (z. B. weil Monitor-Quellen
+nicht angeboten werden), greift die Option `audio_source` als Override. Sie
+setzt `PULSE_SOURCE`, was Vorrang vor der Dropdown-Auswahl hat:
+
 1. Add-on-Log von LedFx öffnen. Direkt nach dem Start steht dort die Liste aller
    Aufnahmequellen:
 

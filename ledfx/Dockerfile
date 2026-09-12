@@ -1,0 +1,45 @@
+ARG BUILD_FROM=ghcr.io/ledfx/ledfx:latest
+FROM ${BUILD_FROM}
+
+# Vom HA-Builder gesetzt, hier nur deklariert damit es keine Warnung gibt.
+ARG BUILD_ARCH
+ARG BUILD_VERSION
+
+# Das Upstream-Image endet mit "USER ledfx" (uid 1000). apt braucht root, und
+# HA-Add-ons laufen als root, sonst ist /share nicht beschreibbar.
+USER root
+
+# Debian trixie (python:3.12). libportaudio2 und pulseaudio sind schon drin,
+# aber mit --no-install-recommends gebaut - die ALSA->PulseAudio-Bruecke fehlt
+# also. Ohne libasound2-plugins sieht PortAudio (und damit LedFx) den
+# PulseAudio-Server des Supervisors nicht.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libasound2-plugins pulseaudio-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Kein eigenes /etc/asound.conf noetig: der Supervisor mountet bei
+# 'audio: true' seine eigene Vorlage schreibgeschuetzt nach /etc/asound.conf
+# (pcm.!default -> type pulse) und ueberschreibt damit jede eigene Datei.
+# Das Plugin dahinter liefert er aber NICHT mit - darum oben libasound2-plugins.
+
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
+
+# Upstream prueft per HEALTHCHECK "pactl info". Ohne nutzbare Audio-Hardware
+# meldet Home Assistant das Add-on sonst dauerhaft als unhealthy.
+HEALTHCHECK NONE
+
+# /share wird vom Supervisor zur Laufzeit ueber den Container gemountet,
+# das Unterverzeichnis legt run.sh beim Start an.
+
+LABEL \
+    io.hass.name="LedFx" \
+    io.hass.description="Audio-reactive LED-Steuerung fuer WLED & Co." \
+    io.hass.type="addon" \
+    io.hass.arch="aarch64|amd64" \
+    io.hass.version="${BUILD_VERSION}"
+
+# Ersetzt /home/ledfx/start.sh (startet einen containereigenen PulseAudio-Daemon,
+# den wir nicht wollen - wir nutzen den des Supervisors).
+ENTRYPOINT []
+CMD ["/run.sh"]

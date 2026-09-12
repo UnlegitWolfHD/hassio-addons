@@ -1,0 +1,66 @@
+---
+name: LedFx
+version: "1.0.0"
+slug: ledfx
+description: >-
+  Audio-reactive LED-Steuerung fuer WLED & Co. (LedFx, offizielles GHCR-Image)
+url: https://github.com/DEIN-GITHUB-USER/ha-ledfx-addon
+stage: experimental
+
+arch:
+  - aarch64
+  - amd64
+
+# Das offizielle LedFx-Image bringt kein s6-overlay mit -> init MUSS false sein.
+init: false
+startup: application
+boot: auto
+
+# Host-Netzwerk: noetig fuer mDNS/Discovery und UDP/DDP/E1.31-Streams ins LAN
+# sowie fuer eingehende Audio-Streams (Snapcast/Squeezelite auf dem Host).
+host_network: true
+
+# Zugriff auf den PulseAudio-Server des Supervisors (/run/audio/pulse.sock).
+# Darueber liefern andere Add-ons (Snapcast Client, Squeezelite, Music Assistant)
+# ihren Ton, den LedFx als Monitor-Quelle mitschneiden kann. Zusaetzlich blendet
+# Home Assistant dadurch auf der Add-on-Seite die Dropdowns fuer Audio-Ein- und
+# -Ausgang ein - das ist der normale Weg, die Quelle zu waehlen.
+audio: true
+
+# Keine erhoehten Rechte noetig: kein full_access, kein privileged, kein host_pid.
+full_access: false
+
+# Persistenz der LedFx-Konfiguration ausserhalb des Containers.
+map:
+  - share:rw
+
+# Bei host_network ignoriert der Supervisor das Port-Mapping; der Eintrag bleibt
+# fuer die Doku und fuer die [PORT:8888]-Ersetzung in webui erhalten.
+ports:
+  8888/tcp: 8888
+ports_description:
+  8888/tcp: LedFx Web-UI
+
+# Kein Ingress: LedFx liefert seine Assets unter absoluten Pfaden aus und
+# funktioniert hinter dem Ingress-Praefix nicht. Siehe README -> Seitenleiste.
+webui: "http://[HOST]:[PORT:8888]"
+
+# Prebuilt-Images aus GitHub Actions nutzen? Dann naechste Zeile einkommentieren
+# und die Version bei jedem Release hochzaehlen:
+# image: ghcr.io/DEIN-GITHUB-USER/{arch}-addon-ledfx
+
+options:
+  host: 0.0.0.0
+  port: 8888
+  log_level: info
+  audio_source: ""
+  null_sink: false
+  offline_mode: false
+
+schema:
+  host: str
+  port: port
+  log_level: list(info|debug|trace)
+  audio_source: str?   # Override fuer das Audio-Dropdown, s. README
+  null_sink: bool
+  offline_mode: bool

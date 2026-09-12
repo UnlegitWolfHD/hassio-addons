@@ -1,0 +1,48 @@
+---
+name: Build Add-on
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ledfx/**"
+      - ".github/workflows/builder.yaml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64
+          - amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login an der GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Der HA-Builder liest Version und Slug selbst aus ledfx/config.yaml und
+      # taggt das Ergebnis als ghcr.io/<owner>/<arch>-addon-ledfx:<version>.
+      # ponytail: @master statt Tag-Pin -> bei Bedarf auf einen Release pinnen.
+      - name: Build & Push
+        uses: home-assistant/builder@master
+        with:
+          args: |
+            --${{ matrix.arch }} \
+            --target /data/ledfx \
+            --image "{arch}-addon-ledfx" \
+            --docker-hub "ghcr.io/${{ github.repository_owner }}" \
+            --addon
