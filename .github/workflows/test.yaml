@@ -22,7 +22,8 @@ jobs:
           import yaml, sys
           files = ['repository.yaml', 'ledfx/config.yaml', 'ledfx/build.yaml',
                    '.github/workflows/builder.yaml', '.github/workflows/test.yaml',
-                   'ledfx/translations/en.yaml', 'ledfx/translations/de.yaml']
+                   'ledfx/translations/en.yaml', 'ledfx/translations/de.yaml',
+                   'homeassistant/ledfx_package.yaml']
           for f in files:
               yaml.safe_load(open(f, encoding='utf-8'))
               print('ok', f)

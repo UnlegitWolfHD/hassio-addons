@@ -25,6 +25,7 @@ für Home Assistant OS / Supervised, basierend auf dem offiziellen Container-Ima
 7. [Updates und Rebuild](#7-updates-und-rebuild)
 8. [Vorgebaute Images per GitHub Actions](#8-vorgebaute-images-per-github-actions)
 8a. [Add-on-Zustand und Healthcheck](#8a-add-on-zustand-und-healthcheck)
+8b. [Steuerung aus Home Assistant](#8b-steuerung-aus-home-assistant)
 9. [Fehlersuche](#9-fehlersuche)
 10. [Repository-Struktur](#10-repository-struktur)
 
@@ -381,6 +382,126 @@ der Watchdog würde das Add-on in einer Schleife neu starten.
 
 ---
 
+## 8b. Steuerung aus Home Assistant
+
+Im Ordner [`homeassistant/`](homeassistant/) liegt ein fertiges Paket, das LedFx
+über die Home-Assistant-Oberfläche bedienbar macht — Szenen, Effekte, Presets,
+Helligkeit, An/Aus.
+
+Es benutzt ausschließlich die REST-API von LedFx. Keine Integration, kein HACS,
+kein Custom Component: nichts, das mit der nächsten LedFx-Version brechen kann.
+(Die umfassendste Integration, `dmamontov/hass-ledfx`, wurde zuletzt im Juli
+2023 angefasst. Gepflegt wird nur `guix77/homeassistant-ledfx`, die kann aber
+ausschließlich Szenen schalten.)
+
+### Einbau
+
+1. `homeassistant/ledfx_package.yaml` nach `config/packages/ledfx.yaml` kopieren.
+2. Die IP ganz oben in der Datei auf deinen Host anpassen (sie kommt mehrfach
+   vor — Suchen und Ersetzen).
+3. Falls noch nicht vorhanden, in `configuration.yaml` ergänzen:
+
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+
+4. Home Assistant neu starten.
+
+### Was du danach hast
+
+| Entität | Zweck |
+|---|---|
+| `input_select.ledfx_scene` | Szenenwahl. Die Liste füllt sich selbst aus LedFx, Auswahl aktiviert die Szene sofort. |
+| `input_number.ledfx_brightness` | Helligkeitsregler für alle aktiven Virtuals. |
+| `script.ledfx_alles_aus` | Schaltet alle Virtuals ab. |
+| `script.ledfx_ueberraschung` | Würfelt die Einstellungen aller laufenden Effekte neu aus. |
+| `sensor.ledfx_szenen` | Anzahl der Szenen; das Attribut `scenes` enthält alle Szenen. |
+| `sensor.ledfx_aktive_virtuals` | Wie viele Virtuals laufen; Attribut `virtuals` mit allen Details. |
+| `sensor.ledfx_version` | LedFx-Version — zugleich Verfügbarkeitsanzeige. |
+
+### Dienste für eigene Automatisierungen
+
+```yaml
+# Szene aktivieren
+- action: rest_command.ledfx_scene
+  data:
+    scene: meine-szene
+
+# Effekt setzen, mit Einstellungen
+- action: rest_command.ledfx_effect
+  data:
+    virtual: wled-gledopto
+    effect: melt
+    config:
+      blur: 3
+      background_brightness: 0.1
+
+# Nur die Einstellungen des laufenden Effekts ändern
+- action: rest_command.ledfx_effect_config
+  data:
+    virtual: wled-gledopto
+    config:
+      blur: 4
+
+# Gespeichertes Preset anwenden
+- action: rest_command.ledfx_preset
+  data:
+    virtual: wled-gledopto
+    effect: melt
+    preset: reset
+    category: ledfx_presets     # oder user_presets
+
+# Virtual an/aus
+- action: rest_command.ledfx_virtual_power
+  data:
+    virtual: wled-gledopto
+    active: true
+```
+
+Die Virtual-IDs stehen im Attribut `virtuals` von `sensor.ledfx_aktive_virtuals`
+(*Entwicklerwerkzeuge → Zustände*), die Szenen-IDs im Attribut `scenes` von
+`sensor.ledfx_szenen`.
+
+### Ein typisches Beispiel
+
+Licht folgt der Musik, sobald Music Assistant spielt, und geht danach aus:
+
+```yaml
+- alias: "LedFx folgt Music Assistant"
+  triggers:
+    - trigger: state
+      entity_id: media_player.music_assistant
+      to: playing
+    - trigger: state
+      entity_id: media_player.music_assistant
+      to: paused
+      for: "00:02:00"
+  actions:
+    - choose:
+        - conditions: "{{ trigger.to_state.state == 'playing' }}"
+          sequence:
+            - action: rest_command.ledfx_scene
+              data:
+                scene: party
+      default:
+        - action: script.ledfx_alles_aus
+```
+
+> **Zum Recorder:** Die beiden Sensoren tragen die vollständigen Szenen- und
+> Virtual-Objekte als Attribut. Bei vielen Szenen wird die Datenbank davon
+> unnötig groß. In `configuration.yaml`:
+>
+> ```yaml
+> recorder:
+>   exclude:
+>     entities:
+>       - sensor.ledfx_szenen
+>       - sensor.ledfx_aktive_virtuals
+> ```
+
+---
+
 ## 9. Fehlersuche
 
 | Symptom | Ursache / Lösung |
@@ -410,6 +531,8 @@ setzen.
 ├── README.md
 ├── repository.yaml               # macht das Repo zum HA-Add-on-Store-Repository
 ├── test_run.sh                   # Selbsttest fuer run.sh (sh test_run.sh)
+├── homeassistant/
+│   └── ledfx_package.yaml        # Steuerung aus HA (Szenen, Effekte, Helligkeit)
 ├── .github/
 │   └── workflows/
 │       ├── builder.yaml          # Multi-Arch-Build nach ghcr.io (optional)

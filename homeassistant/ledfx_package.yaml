@@ -1,0 +1,248 @@
+# ---------------------------------------------------------------------------
+# LedFx-Steuerung fuer Home Assistant
+#
+# Ablegen unter:  config/packages/ledfx.yaml
+# Einmalig in configuration.yaml ergaenzen:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Danach Home Assistant neu starten.
+#
+# Baut ausschliesslich auf der REST-API von LedFx 2.1.9 auf - keine Integration,
+# kein HACS, nichts, das veralten kann. Geprueft gegen ledfx/api/ in v2.1.9:
+#
+#   PUT  /api/scenes                          {"id", "action": "activate"}
+#   PUT  /api/virtuals/{id}                   {"active": true|false}
+#   POST /api/virtuals/{id}/effects           {"type", "config"}
+#   PUT  /api/virtuals/{id}/presets           {"category", "effect_id", "preset_id"}
+#   GET  /api/scenes | /api/virtuals | /api/info
+#
+# EINZIGE ANPASSUNG: die IP unten auf den Host aendern, auf dem das Add-on laeuft.
+# ---------------------------------------------------------------------------
+
+rest_command:
+  # Szene ("Profil") aktivieren. Erwartet die Szenen-ID, nicht den Anzeigenamen.
+  ledfx_scene:
+    url: "http://192.168.10.108:8888/api/scenes"
+    method: put
+    content_type: "application/json"
+    payload: '{"id": "{{ scene }}", "action": "activate"}'
+    timeout: 10
+
+  # Szene zeitversetzt aktivieren (ms), z. B. zum Einblenden nach dem Start.
+  ledfx_scene_in:
+    url: "http://192.168.10.108:8888/api/scenes"
+    method: put
+    content_type: "application/json"
+    payload: '{"id": "{{ scene }}", "action": "activate_in", "ms": {{ ms | default(1000) }}}'
+    timeout: 10
+
+  # Einzelnes Virtual ein- oder ausschalten.
+  ledfx_virtual_power:
+    url: "http://192.168.10.108:8888/api/virtuals/{{ virtual }}"
+    method: put
+    content_type: "application/json"
+    payload: '{"active": {{ "true" if active else "false" }}}'
+    timeout: 10
+
+  # Effekt setzen. config ist optional; ein leeres config setzt den Effekt zurueck.
+  # Beispiel: config: {"blur": 3, "background_brightness": 0.1}
+  ledfx_effect:
+    url: "http://192.168.10.108:8888/api/virtuals/{{ virtual }}/effects"
+    method: post
+    content_type: "application/json"
+    payload: '{"type": "{{ effect }}", "config": {{ config | default({}, true) | tojson }}}'
+    timeout: 10
+
+  # Gespeichertes Preset anwenden. category ist "ledfx_presets" (mitgeliefert)
+  # oder "user_presets" (selbst gespeichert).
+  ledfx_preset:
+    url: "http://192.168.10.108:8888/api/virtuals/{{ virtual }}/presets"
+    method: put
+    content_type: "application/json"
+    payload: >-
+      {"category": "{{ category | default('ledfx_presets', true) }}",
+       "effect_id": "{{ effect }}", "preset_id": "{{ preset }}"}
+    timeout: 10
+
+  # Helligkeit des laufenden Effekts aendern, OHNE den Effekt zu wechseln.
+  # Moeglich, weil "type" bei PUT optional ist - dann bleibt der aktive Effekt.
+  ledfx_brightness:
+    url: "http://192.168.10.108:8888/api/virtuals/{{ virtual }}/effects"
+    method: put
+    content_type: "application/json"
+    payload: '{"config": {"brightness": {{ brightness | float(1.0) }}}}'
+    timeout: 10
+
+  # Beliebige Effekt-Einstellungen des laufenden Effekts aendern.
+  # Beispiel: config: {blur: 3, background_brightness: 0.1}
+  ledfx_effect_config:
+    url: "http://192.168.10.108:8888/api/virtuals/{{ virtual }}/effects"
+    method: put
+    content_type: "application/json"
+    payload: '{"config": {{ config | default({}, true) | tojson }}}'
+    timeout: 10
+
+  # LedFx wuerfelt die Einstellungen des laufenden Effekts neu aus.
+  # "RANDOMIZE" ist ein Sonderwert, den LedFx selbst kennt; Helligkeit bleibt.
+  ledfx_randomize:
+    url: "http://192.168.10.108:8888/api/virtuals/{{ virtual }}/effects"
+    method: put
+    content_type: "application/json"
+    payload: '{"config": "RANDOMIZE"}'
+    timeout: 10
+
+rest:
+  # Szenenliste. Das Attribut "scenes" enthaelt das vollstaendige Objekt, aus dem
+  # die Automatisierung weiter unten Namen und IDs zieht.
+  - resource: "http://192.168.10.108:8888/api/scenes"
+    scan_interval: 60
+    sensor:
+      - name: "LedFx Szenen"
+        unique_id: ledfx_scenes
+        value_template: "{{ value_json.scenes | count }}"
+        unit_of_measurement: "Szenen"
+        icon: mdi:palette
+        json_attributes:
+          - scenes
+
+  # Virtuals: wie viele gerade aktiv sind, plus das ganze Objekt als Attribut.
+  - resource: "http://192.168.10.108:8888/api/virtuals"
+    scan_interval: 15
+    sensor:
+      - name: "LedFx aktive Virtuals"
+        unique_id: ledfx_active_virtuals
+        value_template: >-
+          {{ value_json.virtuals.values() | map(attribute='active')
+             | select | list | count }}
+        unit_of_measurement: "aktiv"
+        icon: mdi:led-strip-variant
+        json_attributes:
+          - virtuals
+          - paused
+
+  # Dient zugleich als Verfuegbarkeitsanzeige: nicht erreichbar -> unavailable.
+  - resource: "http://192.168.10.108:8888/api/info"
+    scan_interval: 300
+    sensor:
+      - name: "LedFx Version"
+        unique_id: ledfx_version
+        value_template: "{{ value_json.version }}"
+        icon: mdi:information-outline
+
+input_number:
+  ledfx_brightness:
+    name: LedFx Helligkeit
+    icon: mdi:brightness-6
+    min: 0
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+
+input_select:
+  ledfx_scene:
+    name: LedFx Szene
+    icon: mdi:palette
+    options:
+      - "(Szenen werden geladen)"
+
+automation:
+  # Haelt die Auswahlliste mit den Szenen aus LedFx synchron.
+  - id: ledfx_szenenliste_laden
+    alias: "LedFx: Szenenliste laden"
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: sensor.ledfx_szenen
+        attribute: scenes
+    conditions:
+      - condition: template
+        value_template: "{{ state_attr('sensor.ledfx_szenen', 'scenes') is mapping }}"
+    actions:
+      - action: input_select.set_options
+        target:
+          entity_id: input_select.ledfx_scene
+        data:
+          options: >-
+            {{ state_attr('sensor.ledfx_szenen', 'scenes').values()
+               | map(attribute='name') | list | sort }}
+
+  # Aktiviert die ausgewaehlte Szene. Uebersetzt Anzeigename -> Szenen-ID.
+  - id: ledfx_szene_aktivieren
+    alias: "LedFx: ausgewaehlte Szene aktivieren"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_select.ledfx_scene
+    conditions:
+      # Nicht ausloesen, wenn nur die Optionsliste neu gesetzt wurde.
+      - condition: template
+        value_template: >-
+          {{ trigger.from_state is not none
+             and trigger.from_state.state != trigger.to_state.state
+             and ledfx_id | default('') | length > 0 }}
+    variables:
+      ledfx_id: >-
+        {{ (state_attr('sensor.ledfx_szenen', 'scenes') or {}).items()
+           | selectattr('1.name', 'eq', trigger.to_state.state)
+           | map(attribute='0') | first | default('') }}
+    actions:
+      - action: rest_command.ledfx_scene
+        data:
+          scene: "{{ ledfx_id }}"
+
+  # Schiebt den Helligkeitsregler auf alle aktiven Virtuals.
+  # mode: restart fasst schnelle Reglerbewegungen zusammen, die Verzoegerung
+  # entprellt - sonst geht pro Rasterschritt eine Anfrage an LedFx raus.
+  - id: ledfx_helligkeit_setzen
+    alias: "LedFx: Helligkeit setzen"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_number.ledfx_brightness
+    actions:
+      - delay: "00:00:00.6"
+      - repeat:
+          for_each: >-
+            {{ (state_attr('sensor.ledfx_aktive_virtuals', 'virtuals') or {})
+               | dictsort | selectattr('1.active') | map(attribute='0') | list }}
+          sequence:
+            - action: rest_command.ledfx_brightness
+              data:
+                virtual: "{{ repeat.item }}"
+                brightness: >-
+                  {{ (states('input_number.ledfx_brightness') | float(100)) / 100 }}
+
+script:
+  # Schaltet alle Virtuals aus - der "Alles aus"-Knopf.
+  ledfx_alles_aus:
+    alias: "LedFx: alles aus"
+    icon: mdi:led-strip-variant-off
+    mode: single
+    sequence:
+      - repeat:
+          for_each: >-
+            {{ (state_attr('sensor.ledfx_aktive_virtuals', 'virtuals') or {}) | list }}
+          sequence:
+            - action: rest_command.ledfx_virtual_power
+              data:
+                virtual: "{{ repeat.item }}"
+                active: false
+
+  # Wuerfelt die Einstellungen aller aktiven Effekte neu aus.
+  ledfx_ueberraschung:
+    alias: "LedFx: Effekte neu auswuerfeln"
+    icon: mdi:dice-5
+    mode: single
+    sequence:
+      - repeat:
+          for_each: >-
+            {{ (state_attr('sensor.ledfx_aktive_virtuals', 'virtuals') or {})
+               | dictsort | selectattr('1.active') | map(attribute='0') | list }}
+          sequence:
+            - action: rest_command.ledfx_randomize
+              data:
+                virtual: "{{ repeat.item }}"
