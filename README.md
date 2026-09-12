@@ -10,7 +10,7 @@ für Home Assistant OS / Supervised, basierend auf dem offiziellen Container-Ima
 | Web-UI | Port **8888** (Host-Netzwerk) |
 | Konfiguration | persistent unter `/share/ledfx` |
 | Audio | über den PulseAudio-Server des Supervisors (`audio: true`) |
-| Music Assistant | erscheint als **Sendspin**-Player (Port 8927, optional) |
+| Music Assistant | als **Sendspin**-Player - nativ in LedFx oder ueber den mitgelieferten Daemon |
 
 ---
 
@@ -24,6 +24,7 @@ für Home Assistant OS / Supervised, basierend auf dem offiziellen Container-Ima
 6. [WLED-Geräte einbinden](#6-wled-geräte-einbinden)
 7. [Updates und Rebuild](#7-updates-und-rebuild)
 8. [Vorgebaute Images per GitHub Actions](#8-vorgebaute-images-per-github-actions)
+8a. [Add-on-Zustand und Healthcheck](#8a-add-on-zustand-und-healthcheck)
 9. [Fehlersuche](#9-fehlersuche)
 10. [Repository-Struktur](#10-repository-struktur)
 
@@ -173,12 +174,38 @@ Wer eine echte Soundkarte oder einen HDMI-Ausgang nutzt, lässt
 
 ### Schritt 2 – Audioquelle ins Sink schicken
 
-**Variante A (empfohlen): Sendspin — das Add-on selbst als Player**
+**Variante A0 (am wenigsten Maschinerie): LedFx' eigener Sendspin-Client**
 
-Sendspin ist das eigene Player-Protokoll von Music Assistant. Es ist dort
-eingebaut, immer aktiv und findet Geräte per mDNS von allein. Dieses Add-on
-bringt einen Sendspin-Daemon mit, das heißt: **kein zweites Add-on, kein
-Snapcast-Server, keine IP-Eintragerei.**
+LedFx 2.1.9 bringt Sendspin selbst mit — im Paket steckt `ledfx/sendspin/` und
+`aiosendspin` ist eine feste Abhängigkeit. LedFx hängt sich damit direkt an
+Music Assistant, **ohne** den Daemon dieses Add-ons, ohne Null-Sink und ohne
+den Umweg über PulseAudio.
+
+Die Geräteliste startet leer (`SENDSPIN_SERVERS = {}`), der Server muss also
+einmalig registriert werden. Erst suchen lassen:
+
+```bash
+curl http://<HA-IP>:8888/api/sendspin/discover
+```
+
+Oder direkt eintragen:
+
+```bash
+curl -X POST http://<HA-IP>:8888/api/sendspin/servers -H "Content-Type: application/json" -d '{"id":"music-assistant","server_url":"ws://<MA-IP>:8927/sendspin","client_name":"LedFx"}'
+```
+
+Danach in LedFx die Seite neu laden: im Audio-Dropdown steht ein Eintrag
+`SENDSPIN: music-assistant`. Den auswählen. Der Eintrag landet in
+`/share/ledfx/config.json` und übersteht Neustarts.
+
+Wenn das funktioniert, im Add-on `sendspin: false` setzen — sonst konkurrieren
+zwei Clients um denselben Stream und um Port 8927.
+
+**Variante A (mitgelieferter Daemon): das Add-on meldet sich selbst an**
+
+Falls der native Weg klemmt: dieses Add-on bringt einen eigenständigen
+Sendspin-Daemon mit, der sich per mDNS von allein bei Music Assistant meldet —
+kein zweites Add-on, kein Snapcast-Server, keine IP-Eintragerei.
 
 1. *LedFx → Konfiguration →* `sendspin: true` setzen, bei Bedarf
    `sendspin_name` anpassen. Speichern, Add-on neu starten.
@@ -336,6 +363,33 @@ Optional, aber deutlich schneller als der lokale Build auf dem Pi.
 
 ---
 
+## 8a. Add-on-Zustand und Healthcheck
+
+Home Assistant leitet den angezeigten Zustand direkt aus dem Docker-Healthcheck
+des Containers ab. Im Supervisor steht das so:
+
+```python
+case ContainerState.RUNNING:
+    return AppState.STARTUP if self.instance.healthcheck else AppState.STARTED
+```
+
+Ein laufender Container **mit** Healthcheck bleibt also so lange auf
+*„wird gestartet“*, bis Docker `healthy` oder `unhealthy` meldet. Dieses Add-on
+prüft deshalb alle 30 Sekunden, ob die LedFx-Web-UI antwortet, mit 90 Sekunden
+Aufwärmzeit. **So lange kann der Zustand nach dem Start auf „wird gestartet“
+stehen - das ist normal.** Danach springt er auf *Gestartet*.
+
+> **Nicht auf `HEALTHCHECK NONE` ändern.** Docker hinterlegt dann
+> `{"Test": ["NONE"]}`, was der Supervisor für einen vorhandenen Healthcheck
+> hält - der aber nie ein Ergebnis liefert. Das Add-on bleibt dann **für immer**
+> auf „wird gestartet“. Genau diesen Fehler hatte das Add-on bis Version 1.1.0.
+
+Der Healthcheck respektiert die Option `host`: steht dort eine bestimmte
+Adresse statt `0.0.0.0`, wird diese geprüft. Sonst liefe der Check ins Leere und
+der Watchdog würde das Add-on in einer Schleife neu starten.
+
+---
+
 ## 9. Fehlersuche
 
 | Symptom | Ursache / Lösung |
@@ -346,6 +400,7 @@ Optional, aber deutlich schneller als der lokale Build auf dem Pi.
 | Keine Audioquelle in LedFx sichtbar | Abschnitt 5, Schritt 3: ist `pulse`/`default` ausgewählt? Listet das Log überhaupt Quellen? |
 | Pegelanzeige bleibt bei 0 | Es läuft nichts in das Sink. Zuerst im Log des Snapcast-/Squeezelite-Add-ons prüfen, ob es wirklich abspielt, dann die richtige `.monitor`-Quelle wählen. |
 | WLED wird nicht gefunden | Host-Netzwerk aktiv? Gleiches Subnetz? IP manuell eintragen. |
+| Add-on bleibt dauerhaft auf „wird gestartet“ | Antwortet die Web-UI auf dem konfigurierten Port? Siehe Abschnitt 8a. Bis Version 1.1.0 war das ein Fehler im Add-on selbst. |
 | Player taucht in Music Assistant nicht auf | Log auf `Starte Sendspin-Daemon` prüfen. Ist Port 8927 auf dem Host frei? MA und HA im selben Layer-2-Netz (mDNS)? |
 | `FEHLER: Sendspin-Client fehlt im Image` | Das Add-on wurde vor dem Einbau von Sendspin gebaut — Version hochzählen und neu bauen (Abschnitt 7). |
 | Effekte ruckeln auf dem Pi 5 | Framerate in LedFx reduzieren (*Settings → Core → FPS*), weniger Geräte parallel bedienen. |
@@ -365,12 +420,16 @@ setzen.
 ├── test_run.sh                   # Selbsttest fuer run.sh (sh test_run.sh)
 ├── .github/
 │   └── workflows/
-│       └── builder.yaml          # Multi-Arch-Build nach ghcr.io (optional)
+│       ├── builder.yaml          # Multi-Arch-Build nach ghcr.io (optional)
+│       └── test.yaml             # YAML, Shellcheck, Selbsttests, Docker-Build
 └── ledfx/
     ├── config.yaml               # Add-on-Definition (Schema, Ports, Rechte)
     ├── build.yaml                # Basis-Images pro Architektur
     ├── Dockerfile                # Ableitung von ghcr.io/ledfx/ledfx:latest
-    └── run.sh                    # Startskript: Optionen, Audio, Sendspin, LedFx
+    ├── run.sh                    # Startskript: Optionen, Audio, Sendspin, LedFx
+    ├── healthcheck.sh            # bestimmt den Add-on-Zustand in HA
+    ├── DOCS.md                   # Dokumentations-Tab auf der Add-on-Seite
+    └── translations/             # Beschriftung der Optionen (de, en)
 ```
 
 Vor dem Push in allen Dateien `DEIN-GITHUB-USER` durch den eigenen Account

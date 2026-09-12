@@ -29,11 +29,16 @@ RUN /usr/local/bin/python3 -m venv /opt/sendspin && /opt/sendspin/bin/pip instal
 # Das Plugin dahinter liefert er aber NICHT mit - darum oben libasound2-plugins.
 
 COPY run.sh /run.sh
-RUN chmod a+x /run.sh
+COPY healthcheck.sh /healthcheck.sh
+RUN chmod a+x /run.sh /healthcheck.sh
 
-# Upstream prueft per HEALTHCHECK "pactl info". Ohne nutzbare Audio-Hardware
-# meldet Home Assistant das Add-on sonst dauerhaft als unhealthy.
-HEALTHCHECK NONE
+# Der Upstream-Healthcheck prueft "pactl info" - das sagt nichts darueber aus,
+# ob LedFx laeuft, und macht das Add-on ohne Audio-Hardware dauerhaft unhealthy.
+# Ersetzt durch einen Check gegen die Web-UI. NICHT auf "HEALTHCHECK NONE"
+# aendern: Home Assistant haelt das fuer einen vorhandenen Healthcheck, der nie
+# ein Ergebnis liefert, und zeigt das Add-on fuer immer als "wird gestartet".
+# start-period grosszuegig, LedFx braucht auf einem Pi den Moment zum Hochfahren.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3     CMD /healthcheck.sh
 
 # /share wird vom Supervisor zur Laufzeit ueber den Container gemountet,
 # das Unterverzeichnis legt run.sh beim Start an.

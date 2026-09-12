@@ -1,0 +1,41 @@
+---
+configuration:
+  host:
+    name: Web UI address
+    description: >-
+      Interface the web UI listens on. 0.0.0.0 means all of them.
+  port:
+    name: Web UI port
+    description: >-
+      Defaults to 8888. Only change it when that port is taken on the host.
+  log_level:
+    name: Log level
+    description: >-
+      Use info for normal operation; debug and trace are for troubleshooting.
+  audio_source:
+    name: Capture source (override)
+    description: >-
+      Name of the PulseAudio source, usually a *.monitor one. Leave empty and
+      use the Home Assistant audio dropdown instead.
+  null_sink:
+    name: Force a virtual audio target
+    description: >-
+      Creates a sink named "ledfx" and makes it the default output for ALL
+      add-ons. Usually unnecessary - with Sendspin enabled one is created
+      automatically if no sink exists at all.
+  sendspin:
+    name: Register as a Sendspin player
+    description: >-
+      Starts a Sendspin daemon so the add-on shows up as a player in Music
+      Assistant. LedFx 2.1.9 can also do Sendspin natively - see the docs.
+  sendspin_name:
+    name: Sendspin player name
+    description: >-
+      The name the add-on appears under in Music Assistant.
+  offline_mode:
+    name: Offline mode
+    description: >-
+      Runs LedFx with --offline - no update checks, no crash reporting.
+network:
+  8888/tcp: LedFx web interface
+  8927/tcp: Sendspin client (only in use when Sendspin is enabled)

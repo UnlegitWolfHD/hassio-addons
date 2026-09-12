@@ -123,5 +123,39 @@ echo
   && echo "  OK   settings-daemon.json angelegt: $(cat "$TMP/share/ledfx/.config/sendspin/settings-daemon.json")" \
   || { echo "  FAIL settings-daemon.json fehlt"; FAILED=1; }
 
+# --- healthcheck.sh ------------------------------------------------------
+# Der Add-on-Zustand in Home Assistant haengt daran: meldet der Healthcheck nie
+# ein Ergebnis, bleibt das Add-on fuer immer auf "wird gestartet".
+echo
+echo "--- healthcheck.sh"
+HC="$TMP/healthcheck.sh"
+sed "s|/data/options.json|$TMPW/options.json|g" ledfx/healthcheck.sh > "$HC"
+chmod +x "$HC"
+
+HC_PORT=18888
+python -m http.server "$HC_PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
+HTTP_PID=$!
+trap 'kill "$HTTP_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
+sleep 2
+
+hc_case() {  # hc_case <beschreibung> <options-json> <erwarteter exit>
+    echo "$2" > "$TMPW/options.json"
+    # if-Form statt blankem Aufruf: unter "set -e" wuerde ein erwarteter
+    # Fehlschlag sonst den ganzen Test abbrechen.
+    if sh "$HC" >/dev/null 2>&1; then RC=0; else RC=$?; fi
+    if [ "$RC" = "$3" ]; then
+        echo "  OK   $1 (Exit $RC)"
+    else
+        echo "  FAIL $1 -> Exit $RC, erwartet $3"; FAILED=1
+    fi
+}
+
+hc_case "laufende UI auf 0.0.0.0 -> gesund"      "{\"host\":\"0.0.0.0\",\"port\":$HC_PORT}" 0
+hc_case "leere Optionen -> Standardport, nichts da" "{}" 1
+hc_case "falscher Port -> ungesund"              "{\"port\":18999}" 1
+hc_case "abweichender Host wird respektiert"     "{\"host\":\"127.0.0.1\",\"port\":$HC_PORT}" 0
+
+kill "$HTTP_PID" 2>/dev/null
+
 echo
 if [ "$FAILED" = "1" ]; then echo "TESTS FEHLGESCHLAGEN"; exit 1; else echo "ALLE TESTS OK"; fi

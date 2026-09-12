@@ -1,0 +1,77 @@
+---
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Lint & Selbsttests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: YAML pruefen
+        run: |
+          python -c "
+          import yaml, sys
+          files = ['repository.yaml', 'ledfx/config.yaml', 'ledfx/build.yaml',
+                   '.github/workflows/builder.yaml', '.github/workflows/test.yaml',
+                   'ledfx/translations/en.yaml', 'ledfx/translations/de.yaml']
+          for f in files:
+              yaml.safe_load(open(f, encoding='utf-8'))
+              print('ok', f)
+          "
+
+      - name: Optionen und Schema muessen deckungsgleich sein
+        run: |
+          python -c "
+          import yaml
+          c = yaml.safe_load(open('ledfx/config.yaml', encoding='utf-8'))
+          diff = set(c['options']) ^ set(c['schema'])
+          assert not diff, f'options/schema weichen ab: {diff}'
+          t = yaml.safe_load(open('ledfx/translations/en.yaml', encoding='utf-8'))
+          missing = set(c['options']) - set(t['configuration'])
+          assert not missing, f'Uebersetzung fehlt fuer: {missing}'
+          print('ok')
+          "
+
+      - name: Shell-Syntax
+        run: |
+          for f in ledfx/run.sh ledfx/healthcheck.sh test_run.sh; do
+            sh -n "$f" && echo "ok $f"
+          done
+
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # --severity=warning: echte Fehler blockieren, Stilhinweise nicht.
+          shellcheck -s sh --severity=warning ledfx/run.sh ledfx/healthcheck.sh test_run.sh
+
+      - name: Selbsttests
+        run: sh test_run.sh
+
+      - name: Dockerfile baut
+        run: |
+          docker build -t ledfx-addon-test \
+            --build-arg BUILD_ARCH=amd64 \
+            --build-arg BUILD_VERSION=ci \
+            ledfx/
+
+      - name: Healthcheck ist gesetzt und nicht NONE
+        run: |
+          python -c "
+          import json, subprocess
+          cfg = json.loads(subprocess.run(
+              ['docker', 'inspect', 'ledfx-addon-test'],
+              capture_output=True, text=True, check=True).stdout)[0]['Config']
+          hc = cfg.get('Healthcheck') or {}
+          test = hc.get('Test') or []
+          assert test and test != ['NONE'], f'Healthcheck unbrauchbar: {hc}'
+          print('Healthcheck:', test)
+          "
